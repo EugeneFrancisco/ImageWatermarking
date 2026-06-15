@@ -4,6 +4,7 @@ This file defines an image watermarker using RoSteALS method from Bui et al.
 import numpy as np
 import torch
 import torch.nn as nn
+from torchvision.models import resnet50
 from src.watermarkers.image_watermarker import ImageWatermarker
 from src.autoencoders.vqgan import VQGAN
 
@@ -73,6 +74,9 @@ class RoSteALS(ImageWatermarker):
         # The neural network that transforms messages into a latent offset.
         self.message_encoder = self.setup_message_encoder().to(self.device)
 
+        # The ResNet-50 that recovers the message from a (watermarked) image.
+        self.secret_decoder = self.setup_secret_decoder().to(self.device)
+
     def setup_message_encoder(self) -> nn.Module:
         """
         Sets up the neural network that turns messages into latent space representations.
@@ -106,27 +110,46 @@ class RoSteALS(ImageWatermarker):
 
         return nn.Sequential(*layers)
 
-    def encode_batch(self, cover: torch.Tensor, message: torch.Tensor) -> torch.Tensor:
+    def setup_secret_decoder(self) -> nn.Module:
+        """
+        Sets up the ResNet-50 secret decoder D (Bui et al.): it maps an image back
+        to a length-``message_length`` vector of logits, one per message bit.
+        """
+        # Train the decoder from scratch (no ImageNet weights) so it learns to read
+        # the watermark rather than ImageNet features.
+        decoder = resnet50(weights=None)
+
+        # ResNet-50's stem expects 3 channels; widen it if our images differ.
+        if self.c_image != 3:
+            decoder.conv1 = nn.Conv2d(
+                self.c_image, 64, kernel_size=7, stride=2, padding=3, bias=False
+            )
+
+        # Replace the 1000-way ImageNet head with one logit per message bit.
+        decoder.fc = nn.Linear(decoder.fc.in_features, self.message_length)
+        return decoder
+
+    def encode_batch(self, covers: torch.Tensor, messages: torch.Tensor) -> torch.Tensor:
         """
         Watermarks a batch of images, fully in torch and differentiable end to end.
         This is the interface used during training.
 
         Args:
-            cover: a (B, C, H, W) float tensor in [0, 1] on ``self.device``.
-            message: a (B, message_length) float tensor on ``self.device``.
+            covers: a (B, C, H, W) float tensor in [0, 1] on ``self.device``.
+            messages: a (B, message_length) float tensor on ``self.device``.
 
         Returns:
             The watermarked images as a (B, C, H, W) tensor (unclamped [0, 1]).
         """
         # delta is the latent-space offset that carries the message (RoSteALS).
-        delta = self.message_encoder(message)
+        deltas = self.message_encoder(messages)
 
         # the cover image placed in latent space.
-        cover_latent = self.image_autoencoder.encode(cover)
-        assert delta.shape == cover_latent.shape
+        covers_latent = self.image_autoencoder.encode(covers)
+        assert deltas.shape == covers_latent.shape
 
         # add the offset, then decode the watermarked latent back into image space.
-        return self.image_autoencoder.decode(cover_latent + delta)
+        return self.image_autoencoder.decode(covers_latent + deltas)
 
     def encode_image(self, cover: np.ndarray, message: np.ndarray) -> np.ndarray:
         """
@@ -138,7 +161,9 @@ class RoSteALS(ImageWatermarker):
 
         # numpy -> torch: (H, W, C) -> (1, C, H, W), (L, 1) -> (1, L), onto device.
         cover_t = torch.from_numpy(cover).float().permute(2, 0, 1).unsqueeze(0).to(self.device)
-        message_t = torch.from_numpy(message).float().reshape(1, self.message_length).to(self.device)
+        message_t = torch.from_numpy(
+            message
+        ).float().reshape(1, self.message_length).to(self.device)
 
         with torch.no_grad():
             watermarked = self.encode_batch(cover_t, message_t)
@@ -147,9 +172,37 @@ class RoSteALS(ImageWatermarker):
         watermarked = watermarked.squeeze(0).clamp(0.0, 1.0).permute(1, 2, 0)
         return watermarked.cpu().numpy()
 
+    def decode_batch(self, images: torch.Tensor) -> torch.Tensor:
+        """
+        Recovers the message logits from a batch of images, fully in torch and
+        differentiable end to end. This is the interface used during training.
+
+        Args:
+            images: a (B, C, H, W) float tensor in [0, 1] on ``self.device``.
+
+        Returns:
+            A (B, message_length) tensor of raw logits (apply a sigmoid for
+            per-bit probabilities, or threshold at 0 for hard bits).
+        """
+        return self.secret_decoder(images)
+
     def decode_image(self, image: np.ndarray) -> np.ndarray:
-        # TODO
-        pass
+        """
+        Single-image numpy convenience wrapper around :meth:`decode_batch`, for
+        inference. Returns the predicted message as a (message_length, 1) array of
+        0/1 bits, matching the message shape expected by :meth:`encode_image`.
+        """
+        assert image.shape == (self.h_image, self.w_image, self.c_image)
+
+        # numpy -> torch: (H, W, C) -> (1, C, H, W), onto device.
+        image_t = torch.from_numpy(image).float().permute(2, 0, 1).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            logits = self.decode_batch(image_t)
+
+        # Positive logit -> bit 1. (1, L) -> (L, 1).
+        bits = (logits.squeeze(0) > 0).float().reshape(self.message_length, 1)
+        return bits.cpu().numpy()
 
     def train(self) -> None:
         # TODO

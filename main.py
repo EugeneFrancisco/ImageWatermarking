@@ -40,6 +40,8 @@ def main():
     image = load_random_image(DATA_DIR, IMAGE_SIZE)
     message = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
     watermarked = rosteals.encode_image(image, message)
+    recovered = rosteals.decode_image(watermarked)
+    import ipdb; ipdb.set_trace()
 
     # Save the original and reconstruction side by side so the round-trip is visible.
     side_by_side = np.concatenate([image, watermarked], axis=1)
