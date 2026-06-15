@@ -172,30 +172,30 @@ class RoSteALS(ImageWatermarker):
         watermarked = watermarked.squeeze(0).clamp(0.0, 1.0).permute(1, 2, 0)
         return watermarked.cpu().numpy()
 
-    def decode_batch(self, images: torch.Tensor) -> torch.Tensor:
+    def decode_batch(self, stego_images: torch.Tensor) -> torch.Tensor:
         """
         Recovers the message logits from a batch of images, fully in torch and
         differentiable end to end. This is the interface used during training.
 
         Args:
-            images: a (B, C, H, W) float tensor in [0, 1] on ``self.device``.
+            stego_images: a (B, C, H, W) float tensor in [0, 1] on ``self.device``.
 
         Returns:
             A (B, message_length) tensor of raw logits (apply a sigmoid for
             per-bit probabilities, or threshold at 0 for hard bits).
         """
-        return self.secret_decoder(images)
+        return self.secret_decoder(stego_images)
 
-    def decode_image(self, image: np.ndarray) -> np.ndarray:
+    def decode_image(self, stego_image: np.ndarray) -> np.ndarray:
         """
         Single-image numpy convenience wrapper around :meth:`decode_batch`, for
         inference. Returns the predicted message as a (message_length, 1) array of
         0/1 bits, matching the message shape expected by :meth:`encode_image`.
         """
-        assert image.shape == (self.h_image, self.w_image, self.c_image)
+        assert stego_image.shape == (self.h_image, self.w_image, self.c_image)
 
         # numpy -> torch: (H, W, C) -> (1, C, H, W), onto device.
-        image_t = torch.from_numpy(image).float().permute(2, 0, 1).unsqueeze(0).to(self.device)
+        image_t = torch.from_numpy(stego_image).float().permute(2, 0, 1).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
             logits = self.decode_batch(image_t)
@@ -207,3 +207,27 @@ class RoSteALS(ImageWatermarker):
     def train(self) -> None:
         # TODO
         pass
+
+    def get_loss(
+            self,
+            covers: torch.Tensor,
+            messages: torch.Tensor,
+            stego_images: torch.Tensor,
+            recovered_messages: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Returns a tuple of (quality loss, recovery loss) for the passed in data.
+        Args:
+            covers: a (B, C, H, W) tensor of images that were used to create watermarks.
+            messages: a (B, message_length) tensor of messages that were encoded.
+            stego_images: a (B, C, H, W) tensor of images that have been watermarked with the passed
+                in messages.
+            recovered_messages: a (B, message_length) tensor of recovered messages from the
+                watermarked images.
+
+        Returns:
+            A tuple where the first element of the tuple of the quality loss and the second element
+            is the recovery loss. For definitions of what these are, check the Bui et al. paper.
+        """
+
+        # Calculate the MSE loss between the covers and the stego_images.

@@ -20,7 +20,7 @@ class ImageWatermarker(ABC):
         message, these should be included in the configs dictionary in the constructor.
         """
 
-    def decode_image(self, image: np.ndarray) -> np.ndarray:
+    def decode_image(self, stego_image: np.ndarray) -> np.ndarray:
         """
         Given an image, returns the bit array that the image decodes to. I.e., the
         prediction of what the message used to encode the image to begin with actually was.
