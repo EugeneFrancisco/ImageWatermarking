@@ -9,6 +9,28 @@ import lpips
 import numpy as np
 import torch
 from PIL import Image
+from torch.utils.data import Dataset
+from tqdm import tqdm
+
+
+class NpyImageDataset(Dataset):
+    """
+    Wraps a precomputed (N, C, H, W) uint8 .npy array (see precompute_image_tensors)
+    as a PyTorch Dataset. The file is memory-mapped, so images are read from disk
+    on demand rather than loaded into RAM up front.
+    """
+
+    def __init__(self, npy_path: Path):
+        # mmap_mode="r" keeps the array on disk; slices are read lazily per __getitem__.
+        self.images = np.load(npy_path, mmap_mode="r")
+
+    def __len__(self) -> int:
+        return len(self.images)
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        # Copy the mmap slice into RAM, then convert uint8 [0, 255] -> float [0, 1].
+        image = np.asarray(self.images[index], dtype=np.float32) / 255.0
+        return torch.from_numpy(image)
 
 
 @lru_cache(maxsize=None)
@@ -30,6 +52,41 @@ def load_random_images(data_dir: Path, size: int, batch_size: int) -> torch.Tens
     batch = np.stack(images, axis=0)  # (batch_size, H, W, C)
     batch = np.transpose(batch, (0, 3, 1, 2))  # (batch_size, C, H, W)
     return torch.from_numpy(batch)
+
+
+def load_all_images(data_dir: Path, size: int) -> torch.Tensor:
+    """Loads every image in data_dir as an (N, C, H, W) float tensor in [0, 1]."""
+    images = [
+        np.asarray(Image.open(path).convert("RGB").resize((size, size)), dtype=np.float32)
+        / 255.0
+        for path in list_images(data_dir)
+    ]
+    batch = np.stack(images, axis=0)  # (N, H, W, C)
+    batch = np.transpose(batch, (0, 3, 1, 2))  # (N, C, H, W)
+    return torch.from_numpy(batch)
+
+
+def precompute_image_tensors(data_dir: Path, out_path: Path, size: int) -> None:
+    """
+    Precomputes every image in data_dir into a single (N, C, size, size) uint8 array
+    saved to out_path, so a DataLoader can later memory-map it and skip the slow JPEG
+    decode/resize.
+
+    Pixels are stored as uint8 in [0, 255] (4x smaller than float32 and lossless);
+    divide by 255 at load time to get a float tensor in [0, 1]. The array is written
+    straight to disk via a memmap, so building it does not load every image into RAM.
+    """
+    paths = list_images(data_dir)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Allocate the array on disk up front, then fill it one image at a time.
+    array = np.lib.format.open_memmap(
+        out_path, mode="w+", dtype=np.uint8, shape=(len(paths), 3, size, size)
+    )
+    for i, path in enumerate(tqdm(paths)):
+        image = Image.open(path).convert("RGB").resize((size, size))
+        array[i] = np.asarray(image, dtype=np.uint8).transpose(2, 0, 1)  # (C, size, size)
+    array.flush()
 
 
 # Lazily-built LPIPS network, cached so we only download/instantiate it once.

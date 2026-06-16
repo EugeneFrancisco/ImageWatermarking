@@ -3,14 +3,17 @@ This file defines an image watermarker using RoSteALS method from Bui et al.
 """
 import os
 import shutil
+from datetime import datetime
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import Dataset, Subset, DataLoader
 from torchvision.models import resnet50
 from src.watermarkers.image_watermarker import ImageWatermarker
 from src.autoencoders.vqgan import VQGAN
 import src.utils as utils
+from tqdm import tqdm
 
 class Reshape(nn.Module):
     """
@@ -86,6 +89,9 @@ class RoSteALS(ImageWatermarker):
         # The number of training epochs.
         self.num_epochs: int = self.configs["num_epochs"]
 
+        # The number of training examples used until the bit accuracy crosses 0.9.
+        self.training_subset_divisor: int = self.configs["training_subset_divisor"]
+
         # The batch size.
         self.batch_size: int = self.configs["batch_size"]
 
@@ -93,13 +99,32 @@ class RoSteALS(ImageWatermarker):
         self.alpha: float = self.configs["alpha"]
 
         # Controls the weight of the quality loss objective.
-        self.beta: float = self.configs["beta"]
+        self.beta: float = self.configs["beta_min"]
+
+        # Once we begin scheduling beta, we will linearly increase from beta to
+        # beta_max by beta_delta
+        self.beta_max: float = self.configs["beta_max"]
+        self.beta_delta: float = self.configs["beta_delta"]
+
+        # An update flag for when we can begin linearly increasing beta.
+        self.update_flag: bool = False
 
         # Where TensorBoard training logs are written.
         self.tensorboard_log_dir: str = self.configs.get("tensorboard_log_dir", "runs/rosteals")
 
         # The TensorBoard writer used to log losses during training.
         self.tensorboard = SummaryWriter(log_dir=self.tensorboard_log_dir)
+
+        # AdamW optimizes both trainable networks (the frozen autoencoder is excluded).
+        # Kept as a member so optimizer state persists across train_until calls.
+        self.optimizer = torch.optim.AdamW(
+            list(self.message_encoder.parameters())
+            + list(self.secret_decoder.parameters()),
+            lr=8e-5,
+        )
+
+        # Global training step, used for TensorBoard logging across train_until calls.
+        self.step = 0
 
     def setup_message_encoder(self) -> nn.Module:
         """
@@ -230,62 +255,104 @@ class RoSteALS(ImageWatermarker):
         bits = (logits.squeeze(0) > 0).float().reshape(self.message_length, 1)
         return bits.cpu().numpy()
 
-    def train(self, images: torch.Tensor) -> None:
+    def train(self, dataset: Dataset) -> None:
         """
         Trains the message encoder and secret decoder on a dataset of cover images.
         The frozen image autoencoder is used as-is; only the message encoder and
         secret decoder are optimized.
-
-        Args:
-            images: a (N, C, H, W) float tensor in [0, 1] of cover images.
         """
-        self.message_encoder.train()
         self.secret_decoder.train()
+        self.message_encoder.train()
 
-        # Clear any existing TensorBoard data so this run starts fresh.
-        self.tensorboard.close()
-        if os.path.exists(self.tensorboard_log_dir):
-            shutil.rmtree(self.tensorboard_log_dir)
-        self.tensorboard = SummaryWriter(log_dir=self.tensorboard_log_dir)
+        # Timestamp of when training started, used to name the saved weights.
+        start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-        optimizer = torch.optim.Adam(
-            list(self.message_encoder.parameters())
-            + list(self.secret_decoder.parameters())
+        baby_dataset = Subset(dataset, range(len(dataset) // self.training_subset_divisor))
+        # Train until bit accuracy is 0.9.
+        self.train_until(baby_dataset, bit_accuracy_threshold=0.9)
+        self.update_flag = True
+
+        # Train until bit accuracy is 0.98.
+        self.train_until(dataset, bit_accuracy_threshold=0.98)
+
+        # TODO, insert noise model
+        self.train_until(dataset, max_epochs = 2)
+
+        self.save_model(f"models/rosteals_{start_time}.pt")
+
+    def save_model(self, path: str = "models/rosteals.pt") -> None:
+        """
+        Saves the trainable network weights (message encoder and secret decoder)
+        to ``path``. The frozen autoencoder is not saved.
+        """
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        torch.save(
+            {
+                "message_encoder": self.message_encoder.state_dict(),
+                "secret_decoder": self.secret_decoder.state_dict(),
+            },
+            path,
         )
 
-        num_images = images.shape[0]
-        step = 0
-        for epoch in range(self.num_epochs):
-            # Shuffle the images at the start of each epoch.
-            perm = torch.randperm(num_images)
-            for start in range(0, num_images, self.batch_size):
-                covers = images[perm[start:start + self.batch_size]].to(self.device)
+    def load_model(self, path: str = "models/rosteals.pt") -> None:
+        """
+        Loads previously saved message encoder and secret decoder weights from
+        ``path`` into this instance.
+        """
+        checkpoint = torch.load(path, map_location=self.device)
+        self.message_encoder.load_state_dict(checkpoint["message_encoder"])
+        self.secret_decoder.load_state_dict(checkpoint["secret_decoder"])
 
-                # Sample random binary messages, one per cover in the batch.
+    def train_until(self, dataset: Dataset, bit_accuracy_threshold=None, max_epochs=None) -> None:
+        """
+        Trains the message encoder and secret decoder on the passed in dataset
+        until theshold is reached or max_epochs is reached.
+        """
+        max_epochs = max_epochs if max_epochs is not None else self.num_epochs
+        loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
+
+        for epoch in range(max_epochs):
+            for covers in tqdm(loader, desc=f"epoch {epoch}"):
+                covers = covers.to(self.device)
+
+                # Random {0, 1} messages, one per cover in the batch.
                 messages = torch.randint(
                     0, 2, (covers.shape[0], self.message_length), device=self.device
                 ).float()
 
-                # Watermark, then try to recover the message.
                 stego_images = self.encode_batch(covers, messages)
                 recovered_messages = self.decode_batch(stego_images)
 
-                recovery_loss, quality_loss = self.get_loss(
+                loss_recovery, loss_quality = self.get_loss(
                     covers, messages, stego_images, recovered_messages
                 )
+                loss = loss_recovery + self.beta * loss_quality
 
-                total_loss = recovery_loss + self.beta * quality_loss
-                optimizer.zero_grad()
-                total_loss.backward()
-                optimizer.step()
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
 
-                # Log the losses for this batch to TensorBoard.
-                self.tensorboard.add_scalar("loss/recovery", recovery_loss.item(), step)
-                self.tensorboard.add_scalar("loss/quality", quality_loss.item(), step)
-                self.tensorboard.add_scalar("loss/total", total_loss.item(), step)
-                step += 1
+                # Hard-decode the logits and measure the fraction of correct bits.
+                predicted_bits = (recovered_messages > 0).float()
+                bit_accuracy = (predicted_bits == messages).float().mean().item()
 
-            print(f"Epoch {epoch + 1}/{self.num_epochs}, loss: {total_loss.item():.4f}")
+                self.tensorboard.add_scalar("loss/recovery", loss_recovery.item(), self.step)
+                self.tensorboard.add_scalar("loss/quality", loss_quality.item(), self.step)
+                self.tensorboard.add_scalar("bit_accuracy", bit_accuracy, self.step)
+                self.step += 1
+
+                if bit_accuracy_threshold is not None and bit_accuracy >= bit_accuracy_threshold:
+                    return
+            self.update_beta()
+
+    def update_beta(self):
+        """
+        Linearly increases beta once the flag is set and until beta reaches
+        the max beta.
+        """
+        if not self.update_flag or self.beta >= self.beta_max:
+            return
+        self.beta += self.beta_delta
 
     def get_loss(
             self,
