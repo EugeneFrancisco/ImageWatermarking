@@ -46,6 +46,7 @@ def main():
         "beta_min": BETA_MIN,
         "beta_max": BETA_MAX,
         "beta_delta": BETA_DELTA,
+        "learning_rate": 1e-3,
         "num_epochs": NUM_EPOCHS,
         "batch_size": BATCH_SIZE,
         "training_subset_divisor": 10

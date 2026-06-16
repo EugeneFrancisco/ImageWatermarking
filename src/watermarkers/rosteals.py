@@ -86,6 +86,9 @@ class RoSteALS(ImageWatermarker):
 
         # ===== Training Hyperparameters are below =======
 
+        # AdamW learning rate
+        self.lr: float = self.configs["learning_rate"]
+
         # The number of training epochs.
         self.num_epochs: int = self.configs["num_epochs"]
 
@@ -109,8 +112,11 @@ class RoSteALS(ImageWatermarker):
         # An update flag for when we can begin linearly increasing beta.
         self.update_flag: bool = False
 
-        # Where TensorBoard training logs are written.
-        self.tensorboard_log_dir: str = self.configs.get("tensorboard_log_dir", "runs/rosteals")
+        # Where TensorBoard training logs are written. The run timestamp is appended
+        # so each run gets its own subdirectory rather than overwriting the last.
+        run_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        base_log_dir = self.configs.get("tensorboard_log_dir", "runs/rosteals")
+        self.tensorboard_log_dir: str = f"{base_log_dir}_{run_timestamp}"
 
         # The TensorBoard writer used to log losses during training.
         self.tensorboard = SummaryWriter(log_dir=self.tensorboard_log_dir)
@@ -120,7 +126,7 @@ class RoSteALS(ImageWatermarker):
         self.optimizer = torch.optim.AdamW(
             list(self.message_encoder.parameters())
             + list(self.secret_decoder.parameters()),
-            lr=8e-5,
+            lr=self.lr,
         )
 
         # Global training step, used for TensorBoard logging across train_until calls.
@@ -131,23 +137,14 @@ class RoSteALS(ImageWatermarker):
         Sets up the neural network that turns messages into latent space representations.
         """
         # R^ell -> latent space. This is what encodes the messages.
-        # Project the message into a (c_little, h_little, w_little) seed map...
+        # Project the message into the latent space.
         layers = [
             nn.Linear(self.message_length, self.h_little * self.w_little * self.c_little),
             nn.SiLU(),
-            Reshape(self.c_little, self.h_little, self.w_little),
+            nn.Unflatten(1, (self.c_little, self.h_little, self.w_little)),
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(self.c_little, self.c_little, 3, padding = 1)
         ]
-
-        # ...then double the spatial size each step until it matches the latent grid.
-        num_upsamples = int(np.log2(self.h_latent / self.h_little))
-        assert self.h_little * 2 ** num_upsamples == self.h_latent
-        assert self.w_little * 2 ** num_upsamples == self.w_latent
-        for _ in range(num_upsamples):
-            layers += [
-                nn.Upsample(scale_factor=2, mode="nearest"),
-                nn.Conv2d(self.c_little, self.c_little, 3, padding=1),
-                nn.SiLU(),
-            ]
 
         # Final conv fixes the channel count to the latent's. Zero-init means the
         # offset starts at zero, so the stego latent equals the cover latent until
@@ -192,6 +189,12 @@ class RoSteALS(ImageWatermarker):
         """
         # delta is the latent-space offset that carries the message (RoSteALS).
         deltas = self.message_encoder(messages)
+
+        # Track how large the offset is getting during training: if bit accuracy is
+        # stuck, this tells us whether the encoder is actually learning to embed.
+        if self.message_encoder.training:
+            delta_l2 = deltas.flatten(1).norm(dim=1).mean().item()
+            self.tensorboard.add_scalar("delta_l2", delta_l2, self.step)
 
         # the cover image placed in latent space.
         covers_latent = self.image_autoencoder.encode(covers)
