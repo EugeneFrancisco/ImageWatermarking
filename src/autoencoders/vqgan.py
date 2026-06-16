@@ -56,12 +56,14 @@ class VQGAN(AutoEncoder):
         """
         Returns the images reconstructed from latents produced by :meth:`encode`.
 
-        The latents are vector-quantized to the nearest codebook entries before
-        being decoded back into pixel space. The output is in ``[0, 1]`` but is
+        We decode the *continuous* latents directly (``force_not_quantize=True``):
+        RoSteALS embeds the message as a small additive offset in the continuous
+        latent space, and re-quantizing here would snap that offset to the nearest
+        codebook entry and destroy the watermark. The output is in ``[0, 1]`` but is
         left unclamped so it stays differentiable everywhere; clamp at the point
         the tensor is turned back into an image.
         """
-        images = self.model.decode(latents).sample
+        images = self.model.decode(latents, force_not_quantize=True).sample
         return images / 2.0 + 0.5  # back to [0, 1]
 
     @classmethod
