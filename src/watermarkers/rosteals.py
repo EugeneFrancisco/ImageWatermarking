@@ -69,6 +69,17 @@ class RoSteALS(ImageWatermarker):
         # The ResNet-50 that recovers the message from a (watermarked) image.
         self.secret_decoder = self.setup_secret_decoder().to(self.device)
 
+        # ===== Dataset material ======
+
+        # The full training dataset, which should have the same size as training_data_size
+        self.dataset: Dataset = self.configs["dataset"]
+
+        # The size of the actual training data.
+        self.training_data_size: int = self.configs["training_data_size"]
+
+        # The number of training examples used until the bit accuracy crosses 0.9.
+        self.training_subset_size: int = self.configs["training_subset_size"]
+
         # ===== Training Hyperparameters are below =======
 
         # AdamW learning rate
@@ -79,12 +90,6 @@ class RoSteALS(ImageWatermarker):
 
         # The number of training epochs before we expose the model to the full training set.
         self.num_epochs_for_small_batch: int = self.configs["num_epochs_for_small_batch"]
-
-        # The size of the actual training data.
-        self.training_data_size: int = self.configs["training_data_size"]
-
-        # The number of training examples used until the bit accuracy crosses 0.9.
-        self.training_subset_size: int = self.configs["training_subset_size"]
 
         # The batch size.
         self.batch_size: int = self.configs["batch_size"]
@@ -254,7 +259,7 @@ class RoSteALS(ImageWatermarker):
         bits = (logits.squeeze(0) > 0).float().reshape(self.message_length, 1)
         return bits.cpu().numpy()
 
-    def train(self, dataset: Dataset) -> None:
+    def train(self) -> None:
         """
         Trains the message encoder and secret decoder on a dataset of cover images.
         The frozen image autoencoder is used as-is; only the message encoder and
@@ -269,7 +274,9 @@ class RoSteALS(ImageWatermarker):
         # Where checkpoints are written (a Modal Volume path when run remotely).
         models_dir = self.configs.get("models_dir", "models")
 
-        baby_dataset = Subset(dataset, range(min(self.training_subset_size, len(dataset))))
+        # =================== Checkpoint 0 begins =================
+
+        baby_dataset = Subset(self.dataset, range(min(self.training_subset_size, len(self.dataset))))
 
         # Train until bit accuracy is 0.9. The baby_dataset contains only a couple minibatches
         # worth of images so the max_epochs here is large because we want to do many passes over
@@ -283,14 +290,50 @@ class RoSteALS(ImageWatermarker):
         self.update_flag = True
         self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint1.pt")
 
+        # =================== Checkpoint 1 begins =================
+
         # Train until bit accuracy is 0.98.
-        self.train_until(dataset, bit_accuracy_threshold=0.98)
+        self.train_until(self.dataset, bit_accuracy_threshold=0.98, save_every_epoch=True)
         self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint2.pt")
 
+        # =================== Checkpoint 2 begins =================
         # TODO, insert noise model
-        self.train_until(dataset, max_epochs = 2)
-
+        self.train_until(self.dataset, max_epochs = 2)
         self.save_model(f"{models_dir}/rosteals_{start_time}/final.pt")
+
+    def restart_training(self, save_path: str, checkpoint: int) -> None:
+        """
+        Restarts training from the passed in save_path and starting from the checkpoint.
+        Args:
+            save_path: a path to a .pt file that saves the training information.
+            checkpoint: an int that is either 1 or 2. If it is 1, this means we restart
+            training from the point that we reveal the model to the full training set (t1)
+            If it is 2, then we start training from the point that we begin noising the
+            images.
+        """
+        assert checkpoint in (1, 2)
+
+        # Restore weights, optimizer state, and the beta schedule progress.
+        self.load_model(save_path)
+
+        self.secret_decoder.train()
+        self.message_encoder.train()
+
+        # Timestamp of when this resumed run started, used to name new checkpoints.
+        start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        models_dir = self.configs.get("models_dir", "models")
+
+        if checkpoint == 1:
+            # =================== Checkpoint 1 begins =================
+            # Train until bit accuracy is 0.98.
+            self.train_until(self.dataset, bit_accuracy_threshold=0.98, save_every_epoch=True)
+            self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint2.pt")
+
+        # =================== Checkpoint 2 begins =================
+        # TODO, insert noise model
+        self.train_until(self.dataset, max_epochs=2)
+        self.save_model(f"{models_dir}/rosteals_{start_time}/final.pt")
+
 
     def save_model(self, path: str = "models/rosteals.pt") -> None:
         """
@@ -302,6 +345,14 @@ class RoSteALS(ImageWatermarker):
             {
                 "message_encoder": self.message_encoder.state_dict(),
                 "secret_decoder": self.secret_decoder.state_dict(),
+                # Optimizer state (AdamW moments + step counts) so training can
+                # resume without restarting the optimizer cold.
+                "optimizer": self.optimizer.state_dict(),
+                # Training progress that mutates across train_until calls and is
+                # needed to pick the beta schedule back up exactly where we left off.
+                "beta": self.beta,
+                "update_flag": self.update_flag,
+                "step": self.step,
             },
             path,
         )
@@ -315,10 +366,27 @@ class RoSteALS(ImageWatermarker):
         self.message_encoder.load_state_dict(checkpoint["message_encoder"])
         self.secret_decoder.load_state_dict(checkpoint["secret_decoder"])
 
-    def train_until(self, dataset: Dataset, bit_accuracy_threshold=None, max_epochs=None) -> None:
+        # Restore training state if present, so we can resume rather than just
+        # run inference. Guarded with .get so older weight-only checkpoints
+        # still load.
+        if "optimizer" in checkpoint:
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+        self.beta = checkpoint.get("beta", self.beta)
+        self.update_flag = checkpoint.get("update_flag", self.update_flag)
+        self.step = checkpoint.get("step", self.step)
+
+    def train_until(
+            self,
+            dataset: Dataset,
+            bit_accuracy_threshold=None,
+            max_epochs=None,
+            save_every_epoch=False
+        ) -> None:
         """
         Trains the message encoder and secret decoder on the passed in dataset
         until theshold is reached or max_epochs is reached.
+
+        If ``save_every_epoch`` is True, the model is saved after each epoch finishes.
         """
         max_epochs = max_epochs if max_epochs is not None else self.num_epochs
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
@@ -354,7 +422,10 @@ class RoSteALS(ImageWatermarker):
 
                 if bit_accuracy_threshold is not None and bit_accuracy >= bit_accuracy_threshold:
                     return
-                self.update_beta()                
+                self.update_beta()
+
+            if save_every_epoch:
+                self.save_model()
 
     def update_beta(self):
         """

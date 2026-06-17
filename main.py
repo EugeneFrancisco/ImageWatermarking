@@ -26,7 +26,7 @@ ALPHA = 1.5
 BETA_MIN = 0.1
 BETA_MAX = 10
 BETA_DELTA = 1
-NUM_EPOCHS_FOR_LARGE_BATCH = 20
+NUM_EPOCHS_FOR_LARGE_BATCH = 8
 NUM_EPOCHS_FOR_SMALL_BATCH = 200_000
 LEARNING_RATE = 2e-5
 TRAINING_SUBSET_SIZE = 4
@@ -49,6 +49,8 @@ def main(
     tensorboard_log_dir: str = "runs/rosteals",
 ):
     device = device or get_default_device()
+    dataset = utils.NpyImageDataset(data_path)
+    dataset = Subset(dataset, range(TRAINING_DATA_SIZE))
     configs = {
         "device": device,
         "autoencoder_type": "VQGAN",
@@ -64,6 +66,7 @@ def main(
         "beta_max": BETA_MAX,
         "beta_delta": BETA_DELTA,
         "learning_rate": LEARNING_RATE,
+        "dataset": dataset,
         "num_epochs": NUM_EPOCHS_FOR_LARGE_BATCH,
         "num_epochs_for_small_batch": NUM_EPOCHS_FOR_SMALL_BATCH,
         "batch_size": BATCH_SIZE,
@@ -73,9 +76,10 @@ def main(
         "tensorboard_log_dir": tensorboard_log_dir,
     }
     rosteals = RoSteALS(configs)
-    dataset = utils.NpyImageDataset(data_path)
-    dataset = Subset(dataset, range(TRAINING_DATA_SIZE))
-    rosteals.train(dataset)
+    rosteals.restart_training(
+        save_path = "models/rosteals_2026-06-17_18-21-58/checkpoint1.pt",
+        checkpoint=1
+    )
     
 
 
