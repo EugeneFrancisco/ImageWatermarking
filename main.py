@@ -29,6 +29,8 @@ BETA_MIN = 0.1
 BETA_MAX = 10
 BETA_DELTA = 1
 NUM_EPOCHS = 20
+LEARNING_RATE = 1e-4
+TRAINING_SUBSET_SIZE = 8
 
 
 def main():
@@ -46,10 +48,10 @@ def main():
         "beta_min": BETA_MIN,
         "beta_max": BETA_MAX,
         "beta_delta": BETA_DELTA,
-        "learning_rate": 1e-3,
+        "learning_rate": LEARNING_RATE,
         "num_epochs": NUM_EPOCHS,
         "batch_size": BATCH_SIZE,
-        "training_subset_divisor": 10
+        "training_subset_size": TRAINING_SUBSET_SIZE
     }
     rosteals = RoSteALS(configs)
 

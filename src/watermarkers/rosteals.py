@@ -2,32 +2,17 @@
 This file defines an image watermarker using RoSteALS method from Bui et al.
 """
 import os
-import shutil
 from datetime import datetime
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import Dataset, Subset, DataLoader
-from torchvision.models import resnet50
+from torchvision.models import resnet50, ResNet50_Weights
 from src.watermarkers.image_watermarker import ImageWatermarker
 from src.autoencoders.vqgan import VQGAN
 import src.utils as utils
 from tqdm import tqdm
-
-class Reshape(nn.Module):
-    """
-    Wrapper class for reshaping.
-    """
-    def __init__(self, *shape):
-        super().__init__()
-        self.shape = shape
-
-    def forward(self, x):
-        """
-        Reshape x.
-        """
-        return x.reshape(x.shape[0], *self.shape)
 
 class RoSteALS(ImageWatermarker):
     """
@@ -84,6 +69,16 @@ class RoSteALS(ImageWatermarker):
         # The ResNet-50 that recovers the message from a (watermarked) image.
         self.secret_decoder = self.setup_secret_decoder().to(self.device)
 
+        # ImageNet per-channel mean/std used to normalize images in [0, 1] before
+        # feeding them to the (ImageNet-pretrained) secret decoder. Shaped (1, 3, 1, 1)
+        # to broadcast over a (B, C, H, W) batch.
+        self.imagenet_mean = torch.tensor(
+            [0.485, 0.456, 0.406], device=self.device
+        ).reshape(1, 3, 1, 1)
+        self.imagenet_std = torch.tensor(
+            [0.229, 0.224, 0.225], device=self.device
+        ).reshape(1, 3, 1, 1)
+
         # ===== Training Hyperparameters are below =======
 
         # AdamW learning rate
@@ -93,7 +88,7 @@ class RoSteALS(ImageWatermarker):
         self.num_epochs: int = self.configs["num_epochs"]
 
         # The number of training examples used until the bit accuracy crosses 0.9.
-        self.training_subset_divisor: int = self.configs["training_subset_divisor"]
+        self.training_subset_size: int = self.configs["training_subset_size"]
 
         # The batch size.
         self.batch_size: int = self.configs["batch_size"]
@@ -161,9 +156,11 @@ class RoSteALS(ImageWatermarker):
         Sets up the ResNet-50 secret decoder D (Bui et al.): it maps an image back
         to a length-``message_length`` vector of logits, one per message bit.
         """
-        # Train the decoder from scratch (no ImageNet weights) so it learns to read
-        # the watermark rather than ImageNet features.
-        decoder = resnet50(weights=None)
+        # Start from ImageNet-pretrained weights so the decoder inherits useful
+        # low-level features instead of learning everything from scratch. These
+        # weights assume inputs are in [0, 1] and then normalized by the ImageNet
+        # per-channel mean/std; decode_batch applies that normalization.
+        decoder = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
 
         # ResNet-50's stem expects 3 channels; widen it if our images differ.
         if self.c_image != 3:
@@ -236,7 +233,10 @@ class RoSteALS(ImageWatermarker):
             A (B, message_length) tensor of raw logits (apply a sigmoid for
             per-bit probabilities, or threshold at 0 for hard bits).
         """
-        return self.secret_decoder(stego_images)
+        # The decoder is ImageNet-pretrained, so normalize the [0, 1] images with
+        # the ImageNet mean/std it was trained on before decoding.
+        normalized = (stego_images - self.imagenet_mean) / self.imagenet_std
+        return self.secret_decoder(normalized)
 
     def decode_image(self, stego_image: np.ndarray) -> np.ndarray:
         """
@@ -270,9 +270,12 @@ class RoSteALS(ImageWatermarker):
         # Timestamp of when training started, used to name the saved weights.
         start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-        baby_dataset = Subset(dataset, range(len(dataset) // self.training_subset_divisor))
-        # Train until bit accuracy is 0.9.
-        self.train_until(baby_dataset, bit_accuracy_threshold=0.9)
+        baby_dataset = Subset(dataset, range(min(self.training_subset_size, len(dataset))))
+
+        # Train until bit accuracy is 0.9. The baby_dataset contains only a couple minibatches
+        # worth of images so the max_epochs here is large because we want to do many passes over
+        # those images.
+        self.train_until(baby_dataset, bit_accuracy_threshold=0.9, max_epochs=4000)
         self.update_flag = True
 
         # Train until bit accuracy is 0.98.
