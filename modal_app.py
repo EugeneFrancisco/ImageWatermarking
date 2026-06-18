@@ -70,6 +70,7 @@ image = (
         "tqdm",
         "tensorboard",
         "accelerate",
+        "matplotlib"
     )
     .run_function(_download_pretrained_weights)
     # Ship the local source last so editing it doesn't bust the build cache above.

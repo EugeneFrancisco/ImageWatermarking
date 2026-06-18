@@ -170,9 +170,10 @@ class RoSteALS(ImageWatermarker):
         to a length-``message_length`` vector of logits, one per message bit.
         """
         # Start from ImageNet-pretrained weights so the decoder inherits useful
-        # low-level features instead of learning everything from scratch. These
-        # weights assume inputs are in [0, 1] and then normalized by the ImageNet
-        # per-channel mean/std; decode_batch applies that normalization.
+        # low-level features instead of learning everything from scratch. The
+        # pretrained weights were trained on ImageNet-normalized inputs, but we do
+        # not re-apply that normalization: decode_batch feeds the decoder raw
+        # ~[0, 1] pixels and lets fine-tuning adapt the weights to that range.
         decoder = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
 
         # ResNet-50's stem expects 3 channels; widen it if our images differ.
@@ -238,8 +239,13 @@ class RoSteALS(ImageWatermarker):
         """
         Recovers the message logits from a batch of images.
         This is the interface used during training.
+
+        The stego images come straight from ``encode_batch`` (the unclamped VQGAN
+        decode output), so pixels are approximately in [0, 1] but may overshoot
+        slightly past either end; they are passed to the decoder as-is.
         Args:
-            stego_images: a (B, C, H, W) float tensor in [0, 1] on ``self.device``.
+            stego_images: a (B, C, H, W) float tensor of ~[0, 1] pixels on
+                ``self.device``.
         Returns:
             A (B, message_length) tensor of raw logits (apply a sigmoid for
             per-bit probabilities, or threshold at 0 for hard bits).
