@@ -454,6 +454,7 @@ class RoSteALS(ImageWatermarker):
                 self.tensorboard.add_scalar("loss/recovery", loss_recovery.item(), self.step)
                 self.tensorboard.add_scalar("loss/quality", loss_quality.item(), self.step)
                 self.tensorboard.add_scalar("bit_accuracy", bit_accuracy, self.step)
+                self.tensorboard.add_scalar("beta", self.beta, self.step)
                 self.step += 1
 
                 # Only stop once the rolling average over the last 10 batches
