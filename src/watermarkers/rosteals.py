@@ -106,10 +106,7 @@ class RoSteALS(ImageWatermarker):
         self.beta_max: float = self.configs["beta_max"]
 
         # The offset we apply to delta each time we add to it.
-        self.beta_delta: float = (
-            (self.beta_max - self.beta)
-            / (self.num_epochs * (self.training_data_size / self.batch_size))
-        )
+        self.beta_delta: float = self.configs["beta_delta"]
 
         # An update flag for when we can begin linearly increasing beta.
         self.update_flag: bool = False
@@ -310,12 +307,13 @@ class RoSteALS(ImageWatermarker):
         Restarts training from the passed in save_path and starting from the checkpoint.
         Args:
             save_path: a path to a .pt file that saves the training information.
-            checkpoint: an int that is either 1 or 2. If it is 1, this means we restart
+            checkpoint: an int that is either 1, 2, or 3. If it is 1, this means we restart
             training from the point that we reveal the model to the full training set (t1)
-            If it is 2, then we start training from the point that we begin noising the
-            images.
+            If it is 2, then we start training from the point that we begin incrementing beta,
+            meaning the quality loss gets increasingly weighted. If it is 3, then we begin training
+            where we start adding noise.
         """
-        assert checkpoint in (1, 2)
+        assert checkpoint in (1, 2, 3)
 
         # Restore weights, optimizer state, and the beta schedule progress.
         self.load_model(save_path)
@@ -332,17 +330,29 @@ class RoSteALS(ImageWatermarker):
             # Train until bit accuracy is 0.90 again. Update_flag is false so that
             # we prioritize recovery still.
             self.update_flag = False
-            self.train_until(self.dataset, bit_accuracy_threshold=0.80, save_every_epoch=True)
+            self.train_until(
+                            self.dataset,
+                            bit_accuracy_threshold=0.80,
+                            save_every_epoch=True,
+                            progress_bar="step"
+                            )
             self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint2.pt")
 
+        if checkpoint in [1, 2]:
+            # =================== Checkpoint 2 begins =================
             # Start incrementing beta.
             self.update_flag = True
-            self.train_until(self.dataset, bit_accuracy_threshold=0.95, save_every_epoch=True)
+            self.train_until(
+                            self.dataset,
+                            bit_accuracy_threshold=0.95,
+                            save_every_epoch=True,
+                            progress_bar="step"
+                            )
             self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint3.pt")
 
-        # =================== Checkpoint 2 begins =================
+        # =================== Checkpoint 3 begins =================
         # TODO, insert noise model
-        self.train_until(self.dataset, max_epochs=2)
+        self.train_until(self.dataset, max_epochs=2, progress_bar="step")
         self.save_model(f"{models_dir}/rosteals_{start_time}/final.pt")
 
 
@@ -391,14 +401,19 @@ class RoSteALS(ImageWatermarker):
             dataset: Dataset,
             bit_accuracy_threshold=None,
             max_epochs=None,
-            save_every_epoch=False
+            save_every_epoch=False,
+            progress_bar="epoch",
         ) -> None:
         """
         Trains the message encoder and secret decoder on the passed in dataset
         until theshold is reached or max_epochs is reached.
 
         If ``save_every_epoch`` is True, the model is saved after each epoch finishes.
+
+        ``progress_bar`` controls where the tqdm bar lives: "epoch" (default) wraps
+        the outer epoch loop, "step" wraps the inner per-batch loop within each epoch.
         """
+        assert progress_bar in ("epoch", "step")
         max_epochs = max_epochs if max_epochs is not None else self.num_epochs
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
@@ -406,8 +421,13 @@ class RoSteALS(ImageWatermarker):
         # noise before deciding whether the threshold has been reached.
         recent_bit_accuracies = deque(maxlen=10)
 
-        for _ in tqdm(range(max_epochs), desc="epochs"):
-            for covers in loader:
+        epochs = range(max_epochs)
+        if progress_bar == "epoch":
+            epochs = tqdm(epochs, desc="epochs")
+
+        for _ in epochs:
+            steps = tqdm(loader, desc="steps") if progress_bar == "step" else loader
+            for covers in steps:
                 covers = covers.to(self.device)
 
                 # Random {0, 1} messages, one per cover in the batch.
@@ -438,7 +458,10 @@ class RoSteALS(ImageWatermarker):
 
                 # Only stop once the rolling average over the last 10 batches
                 # (once the buffer is full) beats the threshold.
-                if bit_accuracy_threshold is not None and len(recent_bit_accuracies) == recent_bit_accuracies.maxlen:
+                if (
+                    bit_accuracy_threshold is not None
+                    and len(recent_bit_accuracies) == recent_bit_accuracies.maxlen
+                ):
                     rolling_average = sum(recent_bit_accuracies) / len(recent_bit_accuracies)
                     if rolling_average >= bit_accuracy_threshold:
                         return

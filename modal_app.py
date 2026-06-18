@@ -80,7 +80,7 @@ app = modal.App(APP_NAME, image=image)
 
 
 @app.function(
-    gpu="A10G",
+    gpu="A100",
     volumes={DATA_DIR: data_volume, OUTPUT_DIR: output_volume},
     timeout=24 * 60 * 60,
 )
@@ -109,7 +109,7 @@ def train():
 
 
 @app.function(
-    gpu="A10G",
+    gpu="A100",
     volumes={DATA_DIR: data_volume, OUTPUT_DIR: output_volume},
     timeout=24 * 60 * 60,
 )

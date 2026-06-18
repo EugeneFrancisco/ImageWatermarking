@@ -11,7 +11,7 @@ DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
 IMAGE_SIZE = 256
 MESSAGE_LENGTH = 50
-BATCH_SIZE = 4
+BATCH_SIZE = 8
 
 C_IMAGE = 3
 H_IMAGE = IMAGE_SIZE
@@ -22,7 +22,7 @@ C_LITTLE = 3
 ALPHA = 1.5
 BETA_MIN = 0.1
 BETA_MAX = 10
-BETA_DELTA = 1
+BETA_DELTA = (BETA_MAX - BETA_MIN) / 5_000 # just from observation, it seems like 5k steps till convergence roughly
 NUM_EPOCHS_FOR_LARGE_BATCH = 8
 NUM_EPOCHS_FOR_SMALL_BATCH = 200_000
 LEARNING_RATE = 2e-5
