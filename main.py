@@ -1,12 +1,9 @@
 # pylint: skip-file
 from pathlib import Path
 
-import numpy as np
 import torch
 from torch.utils.data import Subset
-from PIL import Image
 
-from src.autoencoders.vqgan import VQGAN
 import src.utils as utils
 from src.watermarkers.rosteals import RoSteALS
 
@@ -29,7 +26,7 @@ BETA_DELTA = 1
 NUM_EPOCHS_FOR_LARGE_BATCH = 8
 NUM_EPOCHS_FOR_SMALL_BATCH = 200_000
 LEARNING_RATE = 2e-5
-TRAINING_SUBSET_SIZE = 4
+TRAINING_SUBSET_SIZE = 8
 TRAINING_DATA_SIZE = 50_000
 
 
