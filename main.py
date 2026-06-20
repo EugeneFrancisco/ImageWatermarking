@@ -8,6 +8,7 @@ from torch.utils.data import Subset
 
 import src.utils as utils
 from src.watermarkers.rosteals import RoSteALS
+from src.noisers.rosteals_noiser import RoSteALSNoiser
 
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
@@ -31,6 +32,9 @@ LEARNING_RATE = 2e-5
 TRAINING_SUBSET_SIZE = 8
 TRAINING_DATA_SIZE = 100_000
 LOG_TENSORBOARD = True
+P_DIFFENTIABLE = 0.45
+P_IMAGENET = 0.45
+P_IDENTITY = 0.1
 
 
 def get_default_device() -> str:
@@ -42,17 +46,32 @@ def get_default_device() -> str:
     return "cpu"
 
 
-def _build_rosteals(
+def build_configs(
     data_path: Path,
     device: str | None,
     models_dir: str,
     tensorboard_log_dir: str,
-) -> RoSteALS:
-    """Builds a RoSteALS with the standard training configs and dataset."""
+) -> dict:
+    """Builds the standard RoSteALS training configs and dataset.
+
+    Args:
+        data_path: Path to the .npy file holding the training images.
+        device: Torch device to run on (e.g. "cuda" or "cpu"); if None, the
+            default device is auto-selected.
+        models_dir: Directory where model checkpoints are saved and loaded.
+        tensorboard_log_dir: Directory where TensorBoard logs are written.
+    """
     device = device or get_default_device()
     dataset = utils.NpyImageDataset(data_path)
     dataset = Subset(dataset, range(TRAINING_DATA_SIZE))
-    configs = {
+    noiser = RoSteALSNoiser({
+        "p_differentiable": P_DIFFENTIABLE,
+        "p_imagenet": P_IMAGENET,
+        "p_identity": P_IDENTITY,
+        "w_image": IMAGE_SIZE,
+        "h_image": IMAGE_SIZE
+    })
+    return {
         "device": device,
         "autoencoder_type": "VQGAN",
         "message_length": MESSAGE_LENGTH,
@@ -75,16 +94,35 @@ def _build_rosteals(
         "training_data_size": TRAINING_DATA_SIZE,
         "models_dir": models_dir,
         "tensorboard_log_dir": tensorboard_log_dir,
-        "log_tensorboard": LOG_TENSORBOARD
+        "log_tensorboard": LOG_TENSORBOARD,
+        "noiser": noiser
     }
+
+
+def _build_rosteals(
+    data_path: Path,
+    device: str | None,
+    models_dir: str,
+    tensorboard_log_dir: str,
+) -> RoSteALS:
+    """Builds a RoSteALS with the standard training configs and dataset.
+
+    Args:
+        data_path: Path to the .npy file holding the training images.
+        device: Torch device to run on (e.g. "cuda" or "cpu"); if None, the
+            default device is auto-selected.
+        models_dir: Directory where model checkpoints are saved and loaded.
+        tensorboard_log_dir: Directory where TensorBoard logs are written.
+    """
+    configs = build_configs(data_path, device, models_dir, tensorboard_log_dir)
     return RoSteALS(configs)
 
 
 def main(
-    data_path: Path = Path("data/train2017_numpy_256.npy"),
-    device: str | None = None,
-    models_dir: str = "models",
-    tensorboard_log_dir: str = "runs/rosteals",
+    data_path: Path,
+    device: str | None,
+    models_dir: str,
+    tensorboard_log_dir: str,
 ):
     rosteals = _build_rosteals(data_path, device, models_dir, tensorboard_log_dir)
     rosteals.load_model("models/rosteals_2026-06-18_16-39-39/checkpoint3.pt")
@@ -113,10 +151,10 @@ def main(
 def restart(
     save_path: str,
     checkpoint: int,
-    data_path: Path = Path("data/train2017_numpy_256.npy"),
-    device: str | None = None,
-    models_dir: str = "models",
-    tensorboard_log_dir: str = "runs/rosteals",
+    data_path: Path,
+    device: str | None,
+    models_dir: str,
+    tensorboard_log_dir: str,
 ):
     """Resumes training from the checkpoint .pt file at ``save_path``."""
     rosteals = _build_rosteals(data_path, device, models_dir, tensorboard_log_dir)
@@ -125,4 +163,9 @@ def restart(
 
 
 if __name__ == "__main__":
-    main()
+    main(
+        data_path=Path("data/train2017_numpy_256.npy"),
+        device=None,
+        models_dir="models",
+        tensorboard_log_dir="runs/rosteals",
+    )

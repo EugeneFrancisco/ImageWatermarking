@@ -12,8 +12,9 @@ from torch.utils.data import Dataset, Subset, DataLoader
 from torchvision.models import resnet50, ResNet50_Weights
 from src.watermarkers.image_watermarker import ImageWatermarker
 from src.autoencoders.vqgan import VQGAN
-import src.utils as utils
 from tqdm import tqdm
+import src.utils as utils
+from src.noisers.noiser import Noiser
 
 class RoSteALS(ImageWatermarker):
     """
@@ -69,6 +70,15 @@ class RoSteALS(ImageWatermarker):
 
         # The ResNet-50 that recovers the message from a (watermarked) image.
         self.secret_decoder = self.setup_secret_decoder().to(self.device)
+
+        # ===== Noising material ======
+
+        # The noiser which we will ultimately use to apply noise between creating stego images
+        # and decoding messages.
+        self.noiser: Noiser = self.configs["noiser"]
+
+        # A flag for when to begin applying noise.
+        self.begin_noising: bool = False
 
         # ===== Dataset material ======
 
@@ -379,9 +389,9 @@ class RoSteALS(ImageWatermarker):
 
         # ====================== Checkpoint 4 begins ==============
         # Begin training with noise
-        # TODO, insert noise model
-        self.train_until(self.dataset, max_epochs=2, progress_bar="step")
-        self.save_model(f"{models_dir}/rosteals_{start_time}/final.pt")
+        self.begin_noising = True
+        self.train_until(self.dataset, max_epochs=5, progress_bar="step")
+        self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint5.pt")
 
 
     def save_model(self, path: str = "models/rosteals.pt") -> None:
@@ -464,6 +474,11 @@ class RoSteALS(ImageWatermarker):
                 ).float()
 
                 stego_images = self.encode_batch(covers, messages)
+
+                # Apply noise if we are at that stage of training.
+                if self.begin_noising:
+                    stego_images = self.noiser.apply_noise(stego_images)
+
                 recovered_messages = self.decode_batch(stego_images)
 
                 loss_recovery = self.get_recovery_loss(messages, recovered_messages)
