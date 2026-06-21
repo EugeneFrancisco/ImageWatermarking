@@ -85,8 +85,14 @@ class RoSteALS(ImageWatermarker):
         # The full training dataset, which should have the same size as training_data_size
         self.dataset: Dataset = self.configs["dataset"]
 
-        # The size of the actual training data.
-        self.training_data_size: int = self.configs["training_data_size"]
+        # The size of the initial exposure set (should be one or two minibatches)
+        self.first_exposure_set_size: int = self.configs["training_data_sizes"][0]
+
+        # The size of the second exposure set (should be a significant portion of the data)
+        self.second_exposure_set_size: int = self.configs["training_data_sizes"][1]
+
+        # The size of the full training data.
+        self.training_data_size: int = self.configs["training_data_sizes"][2]
 
         # The number of training examples used until the bit accuracy crosses 0.9.
         self.training_subset_size: int = self.configs["training_subset_size"]
@@ -288,6 +294,8 @@ class RoSteALS(ImageWatermarker):
         The frozen image autoencoder is used as-is; only the message encoder and
         secret decoder are optimized.
         """
+        assert len(self.dataset) == self.training_data_size
+
         self.secret_decoder.train()
         self.message_encoder.train()
 
@@ -298,10 +306,11 @@ class RoSteALS(ImageWatermarker):
         models_dir = self.configs.get("models_dir", "models")
 
         # =================== Checkpoint 0 begins =================
+        # Train one or two mini batches of data until the 0.9 bit accuracy threshold is reached.
 
         baby_dataset = Subset(
                             self.dataset,
-                            range(min(self.training_subset_size, len(self.dataset)))
+                            range(min(self.first_exposure_set_size, len(self.dataset)))
                             )
 
         # Train until bit accuracy is 0.9. The baby_dataset contains only a couple minibatches
@@ -312,20 +321,46 @@ class RoSteALS(ImageWatermarker):
                         bit_accuracy_threshold=0.9,
                         max_epochs=self.num_epochs_for_small_batch
                         )
-
-        self.update_flag = True
         self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint1.pt")
 
         # =================== Checkpoint 1 begins =================
-
-        # Train until bit accuracy is 0.98.
-        self.train_until(self.dataset, bit_accuracy_threshold=0.98, save_every_epoch=True)
+        # Expose the model to a much larger portion of training data (around half of total)
+        second_dataset = Subset(
+            self.dataset,
+            range(min(self.second_exposure_set_size, len(self.dataset)))
+        )
+        self.train_until(
+                        second_dataset,
+                        bit_accuracy_threshold=0.8,
+                        max_epochs=self.num_epochs
+                        )
         self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint2.pt")
 
+
         # =================== Checkpoint 2 begins =================
-        # TODO, insert noise model
-        self.train_until(self.dataset, max_epochs = 2)
-        self.save_model(f"{models_dir}/rosteals_{start_time}/final.pt")
+        # Train on same dataset as before but begin updating beta.
+        # Train until bit accuracy is 0.98.
+        self.update_flag = True
+        self.train_until(
+                        second_dataset,
+                        bit_accuracy_threshold=0.95,
+                        save_every_epoch=True
+                        )
+        self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint3.pt")
+
+        # =================== Checkpoint 3 begins =================
+        # Expose the model to the full dataset.
+        self.train_until(
+                        self.dataset,
+                        bit_accuracy_threshold=0.98,
+                        save_every_epoch=True
+                        )
+        self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint4.pt")
+
+        # =================== Checkpoint 4 begins =================
+        self.begin_noising = True
+        self.train_until(self.dataset, max_epochs = 5)
+        self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint5.pt")
 
     def restart_training(self, save_path: str, checkpoint: int) -> None:
         """
@@ -352,9 +387,11 @@ class RoSteALS(ImageWatermarker):
 
         if checkpoint == 1:
             # =================== Checkpoint 1 begins =================
-            # Train until bit accuracy is 0.90 again. Update_flag is false so that
-            # we prioritize recovery still.
+            # Train until bit accuracy is 0.80 again. Update_flag is false so that
+            # we prioritize recovery still. At this point, we are exposing the model
+            # to the 50,000 of the training examples.
             self.update_flag = False
+            assert len(self.dataset) == self.second_exposure_set_size
             self.train_until(
                             self.dataset,
                             bit_accuracy_threshold=0.80,
@@ -367,6 +404,7 @@ class RoSteALS(ImageWatermarker):
             # =================== Checkpoint 2 begins =================
             # Start incrementing beta.
             self.update_flag = True
+            assert len(self.dataset) == self.second_exposure_set_size
             self.train_until(
                             self.dataset,
                             bit_accuracy_threshold=0.95,
@@ -379,6 +417,7 @@ class RoSteALS(ImageWatermarker):
             # =================== Checkpoint 3 begins =================
             # Train on all 100,000 examples now until 0.98 is reached.
             self.beta = self.beta_max
+            assert len(self.dataset) == self.training_data_size
             self.train_until(
                             self.dataset,
                             bit_accuracy_threshold=0.98,
@@ -389,6 +428,8 @@ class RoSteALS(ImageWatermarker):
 
         # ====================== Checkpoint 4 begins ==============
         # Begin training with noise
+        assert len(self.dataset) == self.training_data_size
+
         self.begin_noising = True
         self.train_until(self.dataset, max_epochs=5, progress_bar="step")
         self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint5.pt")
