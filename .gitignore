@@ -6,4 +6,4 @@ __pycache__/
 *.pyc
 models/*
 runs/*
-results/*
+results/*/models/*
