@@ -29,7 +29,8 @@ BETA_DELTA = (BETA_MAX - BETA_MIN) / 5_000 # just from observation, it seems lik
 NUM_EPOCHS_FOR_LARGE_BATCH = 8
 NUM_EPOCHS_FOR_SMALL_BATCH = 200_000
 LEARNING_RATE = 2e-5
-TRAINING_SUBSET_SIZE = 8
+FIRST_EXPOSURE_SIZE = 8
+SECOND_EXPOSURE_SIZE = 50_000
 TRAINING_DATA_SIZE = 100_000
 LOG_TENSORBOARD = True
 P_DIFFENTIABLE = 0.45
@@ -90,8 +91,11 @@ def build_configs(
         "num_epochs": NUM_EPOCHS_FOR_LARGE_BATCH,
         "num_epochs_for_small_batch": NUM_EPOCHS_FOR_SMALL_BATCH,
         "batch_size": BATCH_SIZE,
-        "training_subset_size": TRAINING_SUBSET_SIZE,
-        "training_data_size": TRAINING_DATA_SIZE,
+        "training_subset_sizes": {
+            0: FIRST_EXPOSURE_SIZE,
+            1: SECOND_EXPOSURE_SIZE,
+            2: TRAINING_DATA_SIZE
+        },
         "models_dir": models_dir,
         "tensorboard_log_dir": tensorboard_log_dir,
         "log_tensorboard": LOG_TENSORBOARD,

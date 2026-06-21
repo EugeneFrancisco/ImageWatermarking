@@ -94,9 +94,6 @@ class RoSteALS(ImageWatermarker):
         # The size of the full training data.
         self.training_data_size: int = self.configs["training_data_sizes"][2]
 
-        # The number of training examples used until the bit accuracy crosses 0.9.
-        self.training_subset_size: int = self.configs["training_subset_size"]
-
         # ===== Training Hyperparameters are below =======
 
         # AdamW learning rate
