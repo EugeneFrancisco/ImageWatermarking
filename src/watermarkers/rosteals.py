@@ -429,6 +429,7 @@ class RoSteALS(ImageWatermarker):
         # ====================== Checkpoint 4 begins ==============
         # Begin training with noise
         assert len(self.dataset) == self.training_data_size
+        self.beta = self.beta_max
 
         self.begin_noising = True
         self.train_until(self.dataset, max_epochs=5, progress_bar="step")
@@ -516,14 +517,20 @@ class RoSteALS(ImageWatermarker):
 
                 stego_images = self.encode_batch(covers, messages)
 
-                # Apply noise if we are at that stage of training.
-                if self.begin_noising:
-                    stego_images = self.noiser.apply_noise(stego_images)
+                # Quality is always measured against the clean watermarked image:
+                # the noise layer is a channel corruption used to train decoder
+                # robustness, not something the encoder should compensate for.
+                loss_quality = self.get_quality_loss(covers, stego_images)
 
-                recovered_messages = self.decode_batch(stego_images)
+                # Apply noise (if we are at that stage) only to what the decoder
+                # sees, so robustness training does not leak into the quality loss.
+                decoder_input = stego_images
+                if self.begin_noising:
+                    decoder_input = self.noiser.apply_noise(stego_images)
+
+                recovered_messages = self.decode_batch(decoder_input)
 
                 loss_recovery = self.get_recovery_loss(messages, recovered_messages)
-                loss_quality = self.get_quality_loss(covers, stego_images)
                 loss = loss_recovery + self.beta * loss_quality
 
                 self.optimizer.zero_grad()
