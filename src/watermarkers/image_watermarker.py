@@ -39,7 +39,6 @@ class ImageWatermarker(ABC):
     @abstractmethod
     def validate(self) -> dict:
         """
-        This function should return the quality loss and bit recovery accuracy averaged over a
-        validation set. The validation set should be passed in the constructor as a value in
-        configs.
+        This function should return a dictionary of validation metrics for the trained model.
+        The validation set should be passed into the constructor in configs.
         """

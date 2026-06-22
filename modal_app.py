@@ -20,6 +20,13 @@ Resume training from a saved checkpoint (upload it first, then resume):
     modal volume put rosteals-output ./my_checkpoint.pt restart/checkpoint.pt
     modal run modal_app.py::resume                  # uses restart/checkpoint.pt, checkpoint 1
     modal run modal_app.py::resume --checkpoint 2
+
+Validate a checkpoint on the test set (results land in the rosteals-output volume;
+upload the test .npy to rosteals-data under the same file name first):
+
+    modal run modal_app.py::evaluate
+    modal run modal_app.py::evaluate --checkpoint-path /output/models/rosteals_<ts>/checkpoint5.pt
+    modal volume get rosteals-output test_results.txt ./test_results.txt
 """
 import subprocess
 from pathlib import Path
@@ -36,6 +43,7 @@ output_volume = modal.Volume.from_name("rosteals-output", create_if_missing=True
 DATA_DIR = "/data"
 OUTPUT_DIR = "/output"
 DATA_FILE = "train2017_numpy_256.npy"
+TEST_FILE = "test2017_numpy_256.npy"
 
 # Drop the checkpoint you want to resume from here, in the rosteals-output volume:
 #
@@ -44,6 +52,11 @@ DATA_FILE = "train2017_numpy_256.npy"
 # It then lives at this in-container path, which `modal run modal_app.py::restart`
 # loads from by default.
 RESTART_CHECKPOINT = f"{OUTPUT_DIR}/restart/checkpoint.pt"
+
+# Checkpoint that `modal run modal_app.py::evaluate` validates by default, and the
+# file the per-noise-type validation results get written to (both in rosteals-output).
+TEST_CHECKPOINT = f"{OUTPUT_DIR}/restart/checkpoint.pt"
+TEST_RESULTS = f"{OUTPUT_DIR}/test_results.txt"
 
 
 def _download_pretrained_weights():
@@ -142,6 +155,36 @@ def restart(save_path: str = RESTART_CHECKPOINT, checkpoint: int = 1):
             output_volume.commit()
 
 
+@app.function(
+    gpu="A100",
+    volumes={DATA_DIR: data_volume, OUTPUT_DIR: output_volume},
+    timeout=60 * 60,
+)
+def test(checkpoint_path: str = TEST_CHECKPOINT, results_path: str = TEST_RESULTS):
+    import main as train_main
+
+    # Build a RoSteALS pointed at the test .npy in the data volume, load the
+    # checkpoint, and run the per-noise-type validation.
+    rosteals = train_main._build_rosteals(
+        data_path=Path(f"{DATA_DIR}/{DATA_FILE}"),
+        device="cuda",
+        models_dir=f"{OUTPUT_DIR}/models",
+        tensorboard_log_dir=f"{OUTPUT_DIR}/runs/rosteals",
+        test_set_path=Path(f"{DATA_DIR}/{TEST_FILE}"),
+    )
+    rosteals.load_model(checkpoint_path)
+    results = rosteals.validate()
+    print(results)
+
+    try:
+        with open(results_path, "w", encoding="utf-8") as f:
+            for name, value in results.items():
+                f.write(f"{name}: {value}\n")
+        print(f"Wrote validation results to {results_path}")
+    finally:
+        output_volume.commit()
+
+
 @app.local_entrypoint()
 def run():
     train.remote()
@@ -158,3 +201,17 @@ def resume(save_path: str = RESTART_CHECKPOINT, checkpoint: int = 1):
         modal run modal_app.py::resume --save-path /output/models/rosteals_.../checkpoint2.pt
     """
     restart.remote(save_path=save_path, checkpoint=checkpoint)
+
+
+@app.local_entrypoint()
+def evaluate(checkpoint_path: str = TEST_CHECKPOINT, results_path: str = TEST_RESULTS):
+    """Run per-noise-type validation on a checkpoint living in the rosteals-output volume.
+
+    Results are written to a text file in the rosteals-output volume.
+
+    Usage:
+
+        modal run modal_app.py::evaluate
+        modal run modal_app.py::evaluate --checkpoint-path /output/models/rosteals_.../checkpoint5.pt
+    """
+    test.remote(checkpoint_path=checkpoint_path, results_path=results_path)

@@ -10,11 +10,13 @@ import src.utils as utils
 from src.watermarkers.rosteals import RoSteALS
 from src.noisers.rosteals_noiser import RoSteALSNoiser
 
+TRAINING = False
+
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
 IMAGE_SIZE = 256
 MESSAGE_LENGTH = 50
-BATCH_SIZE = 8
+BATCH_SIZE = 8 if TRAINING else 2
 
 C_IMAGE = 3
 H_IMAGE = IMAGE_SIZE
@@ -32,7 +34,7 @@ LEARNING_RATE = 2e-5
 FIRST_EXPOSURE_SIZE = 8
 SECOND_EXPOSURE_SIZE = 50_000
 TRAINING_DATA_SIZE = 100_000
-LOG_TENSORBOARD = False
+LOG_TENSORBOARD = True if TRAINING else False
 P_DIFFENTIABLE = 0.45
 P_IMAGENET = 0.45
 P_IDENTITY = 0.1
@@ -52,6 +54,7 @@ def build_configs(
     device: str | None,
     models_dir: str,
     tensorboard_log_dir: str,
+    test_set_path: Path | None = None
 ) -> dict:
     """Builds the standard RoSteALS training configs and dataset.
 
@@ -61,10 +64,12 @@ def build_configs(
             default device is auto-selected.
         models_dir: Directory where model checkpoints are saved and loaded.
         tensorboard_log_dir: Directory where TensorBoard logs are written.
+        test_set_path: the path to the .npy file folding testing images.
     """
     device = device or get_default_device()
     dataset = utils.NpyImageDataset(data_path)
     dataset = Subset(dataset, range(TRAINING_DATA_SIZE))
+    test_set = utils.NpyImageDataset(test_set_path) if test_set_path is not None else None
     noiser = RoSteALSNoiser({
         "p_differentiable": P_DIFFENTIABLE,
         "p_imagenet": P_IMAGENET,
@@ -88,6 +93,7 @@ def build_configs(
         "beta_delta": BETA_DELTA,
         "learning_rate": LEARNING_RATE,
         "dataset": dataset,
+        "test_set": test_set,
         "num_epochs": NUM_EPOCHS_FOR_LARGE_BATCH,
         "num_epochs_for_small_batch": NUM_EPOCHS_FOR_SMALL_BATCH,
         "batch_size": BATCH_SIZE,
@@ -108,6 +114,7 @@ def _build_rosteals(
     device: str | None,
     models_dir: str,
     tensorboard_log_dir: str,
+    test_set_path: Path | None = None
 ) -> RoSteALS:
     """Builds a RoSteALS with the standard training configs and dataset.
 
@@ -118,7 +125,7 @@ def _build_rosteals(
         models_dir: Directory where model checkpoints are saved and loaded.
         tensorboard_log_dir: Directory where TensorBoard logs are written.
     """
-    configs = build_configs(data_path, device, models_dir, tensorboard_log_dir)
+    configs = build_configs(data_path, device, models_dir, tensorboard_log_dir, test_set_path)
     return RoSteALS(configs)
 
 
@@ -128,9 +135,27 @@ def main(
     models_dir: str,
     tensorboard_log_dir: str,
 ):
-    utils.precompute_image_tensors(
-        data_dir = 
+    rosteals = _build_rosteals(
+        data_path,
+        device,
+        models_dir,
+        tensorboard_log_dir,
+        Path("data/test2017_numpy_256.npy")
     )
+    rosteals.load_model(
+        "results/experiment_1/models/rosteals_2026-06-21_02-20-52/checkpoint5_epoch_1.pt"
+    )
+    test_results = rosteals.validate()
+    print(test_results)
+
+    # Placeholder output path -- change this to wherever you want the results saved.
+    results_path = Path("results/experiment_1/test_results.txt")
+    results_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(results_path, "w", encoding="utf-8") as f:
+        for name, value in test_results.items():
+            f.write(f"{name}: {value}\n")
+    print(f"Wrote validation results to {results_path}")
+
 
 
 

@@ -278,6 +278,10 @@ _CORRUPTIONS = {
 # Default training set: everything we support here.
 DEFAULT_CORRUPTION_IDS = sorted(_CORRUPTIONS)
 
+# Human-readable name for each corruption id (its function name), so callers can
+# label per-corruption metrics.
+CORRUPTION_NAMES = {cid: fn.__name__ for cid, fn in _CORRUPTIONS.items()}
+
 
 def corrupt(x, severity=1, corruption_number=0):
     """Apply one corruption to an HxWx3 uint8 RGB image; returns uint8 HxWx3."""

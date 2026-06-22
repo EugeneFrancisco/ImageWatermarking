@@ -2,7 +2,7 @@
 This file defines an inheritor of the noiser to mimic the noising scheme from Bui et al.
 """
 from typing import Union, Callable
-from src.noisers.imagenet_corruptions import corrupt, DEFAULT_CORRUPTION_IDS
+from src.noisers.imagenet_corruptions import corrupt, DEFAULT_CORRUPTION_IDS, CORRUPTION_NAMES
 from src.noisers.noiser import Noiser
 from PIL import Image
 import torch
@@ -139,6 +139,40 @@ class RoSteALSNoiser(Noiser):
         corrupted = torch.from_numpy(out).to(x.device)
         # straight-through: forward = corrupted, backward = identity
         return x + (corrupted - x.detach())
+
+    def _imagenet_corrupt_batch(self, x: torch.Tensor, corruption_id: int) -> torch.Tensor:
+        """Apply a single fixed imagenet-c corruption (random severity per image)
+        to a (B, C, H, W) batch. Same straight-through behaviour as
+        _imagenet_noise, but every image gets the same corruption type so the
+        result can be attributed to that one corruption."""
+        x_np = (x.detach().clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
+        x_np = x_np.transpose(0, 2, 3, 1)  # (B, H, W, C)
+
+        lo, hi = self.severity_range
+        out = [
+            self._corrupt_single(img, corruption_id, int(np.random.randint(lo, hi + 1)))
+            for img in x_np
+        ]
+        out = np.stack(out).astype(np.float32) / 255.0
+        out = out.transpose(0, 3, 1, 2)  # (B, C, H, W)
+
+        corrupted = torch.from_numpy(out).to(x.device)
+        return x + (corrupted - x.detach())
+
+    def named_noise_functions(self) -> dict[str, Callable[[torch.Tensor], torch.Tensor]]:
+        """Map each individual noise type to a function applying just that noise to
+        a (B, C, H, W) batch: identity, the differentiable chain, and one entry per
+        configured imagenet-c corruption. Used to measure bit accuracy per noise
+        type independently rather than against a random blend."""
+        funcs = {
+            "identity": lambda x: x,
+            "differentiable": self._differentiable_noise,
+        }
+        for cid in self.corruption_ids:
+            funcs[CORRUPTION_NAMES[cid]] = (
+                lambda x, cid=cid: self._imagenet_corrupt_batch(x, cid)
+            )
+        return funcs
 
     # -- numpy entry point ---------------------------------------------------
     def apply_noise_np(self, image: np.ndarray, noise_type: Union[str, int]) -> np.ndarray:
