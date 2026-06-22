@@ -4,12 +4,32 @@ Plot watermarked images from different checkpoints of the model.
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 from src.watermarkers.image_watermarker import ImageWatermarker
-from src.utils import load_random_image
 from main import IMAGE_SIZE, MESSAGE_LENGTH, _build_rosteals
 
 # Directory where the cover/stego image plots are saved.
 PLOT_SAVE_DIR = Path("results/experiment_1/plots")
+
+# The cover image to watermark and plot.
+IMAGE_PATH = Path("data/menu.png")
+
+
+def load_face_image(path: Path, size: int) -> np.ndarray:
+    """
+    Loads the face image as an (H, W, C) float array in [0, 1] at size x size.
+
+    The image is first center-cropped to a square using the smaller side, then
+    downsampled to size x size with a box filter, which averages the pixels in
+    each block rather than cropping or subsampling them.
+    """
+    image = Image.open(path).convert("RGB")
+    side = min(image.size)
+    left = (image.width - side) // 2
+    top = (image.height - side) // 2
+    image = image.crop((left, top, left + side, top + side))
+    image = image.resize((size, size), Image.BOX)
+    return np.asarray(image, dtype=np.float32) / 255.0
 
 
 def save_image_plot(image: np.ndarray, title: str, filename: str) -> None:
@@ -40,7 +60,7 @@ def main():
         tensorboard_log_dir=None
     )
 
-    cover: np.ndarray = load_random_image(Path("data/train2017"), IMAGE_SIZE)
+    cover: np.ndarray = load_face_image(IMAGE_PATH, IMAGE_SIZE)
     message: np.ndarray = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
 
     save_image_plot(cover, "Original cover image", "cover.png")

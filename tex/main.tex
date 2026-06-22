@@ -2,6 +2,7 @@
 \usepackage{graphicx} % Required for inserting images
 \usepackage{newStyle}
 \usepackage{titling}
+\usepackage{stfloats}
 
 \setlength{\droptitle}{-4em}
 
@@ -67,6 +68,41 @@ In a separate experiment, I tried the same curriculum learning routine but revea
 Because of this, it is possible that the choice of initial mini-batch can affect model robustness and quality which could allow for future work.
 
 Loading the model with ImageNet weights was also critical to training; I tried a couple of training runs with randomly initialized Resnet50 weights to no avail.
+
+\begin{figure*}
+	\includegraphics[scale=0.3]{images/zebra/cover.png}
+	\includegraphics[scale=0.3]{images/zebra/stego_warmup_1.png}
+	\includegraphics[scale=0.3]{images/zebra/stego_warmup_2.png}
+	\includegraphics[scale=0.3]{images/zebra/stego_exposure_2.png}
+	\includegraphics[scale=0.3]{images/zebra/stego_noising.png}
+		\includegraphics[scale=0.3]{images/train/cover.png}
+	\includegraphics[scale=0.3]{images/train/stego_warmup_1.png}
+	\includegraphics[scale=0.3]{images/train/stego_warmup_2.png}
+	\includegraphics[scale=0.3]{images/train/stego_exposure_2.png}
+	\includegraphics[scale=0.3]{images/train/stego_noising.png}
+	\includegraphics[scale=0.3]{images/messed_up_face/cover.png}
+	\includegraphics[scale=0.3]{images/messed_up_face/stego_warmup_1.png}
+	\includegraphics[scale=0.3]{images/messed_up_face/stego_warmup_2.png}
+	\includegraphics[scale=0.3]{images/messed_up_face/stego_exposure_2.png}
+	\includegraphics[scale=0.3]{images/messed_up_face/stego_noising.png}
+	\includegraphics[scale=0.3]{images/big_face/cover.png}
+	\includegraphics[scale=0.3]{images/big_face/stego_warmup_1.png}
+	\includegraphics[scale=0.3]{images/big_face/stego_warmup_2.png}
+	\includegraphics[scale=0.3]{images/big_face/stego_exposure_2.png}
+	\includegraphics[scale=0.3]{images/big_face/stego_noising.png}
+	\includegraphics[scale=0.3]{images/menu/cover.png}
+	\includegraphics[scale=0.3]{images/menu/stego_warmup_1.png}
+	\includegraphics[scale=0.3]{images/menu/stego_warmup_2.png}
+	\includegraphics[scale=0.3]{images/menu/stego_exposure_2.png}
+	\includegraphics[scale=0.3]{images/menu/stego_noising.png}
+	\caption{Sample images from training.}
+		\label{fig:images}
+\end{figure*}
+
+
+After inserting noise, there is a clear compromise with image quality that is made as can be seen in Figure~\ref{fig:images}. In Bui et al's paper, the post-noising watermarks are much less obvious which I attribute to more training time post-noising. However, the \textit{Exposure 2} watermarks are almost invisible with a few notable failure cases.
+
+All watermarking models struggle with human faces and with text (see bottom Figure~\ref{fig:images}). These defects essentially disappear for faces and are slightly alleviated for text once these subjects are larger in the image, suggested that these watermarks fare best with higher resolutions (Figure~\ref{fig:images} row 4 and 5).
 
 
 

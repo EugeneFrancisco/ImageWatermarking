@@ -16,7 +16,7 @@ DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
 IMAGE_SIZE = 256
 MESSAGE_LENGTH = 50
-BATCH_SIZE = 8 if TRAINING else 2
+BATCH_SIZE = 8 if TRAINING else 4
 
 C_IMAGE = 3
 H_IMAGE = IMAGE_SIZE
