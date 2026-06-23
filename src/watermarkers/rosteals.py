@@ -66,10 +66,10 @@ class RoSteALS(ImageWatermarker):
         self.c_little: int = int(self.configs["c_little"])
 
         # The neural network that transforms messages into a latent offset.
-        self.message_encoder = self.setup_message_encoder().to(self.device)
+        self.message_encoder: torch.Module = self.setup_message_encoder().to(self.device)
 
         # The ResNet-50 that recovers the message from a (watermarked) image.
-        self.secret_decoder = self.setup_secret_decoder().to(self.device)
+        self.secret_decoder: torch.Module = self.setup_secret_decoder().to(self.device)
 
         # ===== Noising material ======
 
@@ -681,39 +681,3 @@ class RoSteALS(ImageWatermarker):
             results[key] /= num_steps
 
         return results
-
-
-class RoSteALSPatcher(RoSteALS):
-    """
-    A bootstrapped class to see how tiling watermarks looks with RoSteALS.
-    Making this a seperate class in case I want to change the training scheme.
-    """
-    def encode_image(self, cover: np.ndarray, message: np.ndarray) -> np.ndarray:
-        """
-        Encodes the message into the cover image and returns the watermarked image. The watermark
-        here is applied in patches over the image, where the patch size is the image size passed
-        into the constructor. For example, if the RoSteALS image size is 64 x 64 and a 128 x 128
-        cover image is used, there will be 4 watermarked patches in the 4 quadrants of the image.
-        """
-        height, width = cover.shape[0], cover.shape[1]
-
-        # Copy so partial edge patches (those not exactly h_image x w_image) are
-        # carried through unmodified while full patches get overwritten in place.
-        watermarked = cover.copy()
-
-        for top in range(0, height, self.h_image):
-            for left in range(0, width, self.w_image):
-                bottom = top + self.h_image
-                right = left + self.w_image
-
-                # Skip edge patches that are too small to feed to the encoder;
-                # they stay as the original pixels.
-                if bottom > height or right > width:
-                    continue
-
-                patch = cover[top:bottom, left:right]
-                # Delegate to the base single-patch encoder (not this override)
-                # so the same message is embedded into each full patch.
-                watermarked[top:bottom, left:right] = super().encode_image(patch, message)
-
-        return watermarked
