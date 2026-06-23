@@ -8,37 +8,30 @@ from torch.utils.data import Subset
 
 import src.utils as utils
 import src.plotting.image_plotting as image_plotting
-from src.watermarkers.rosteals import RoSteALS, RoSteALSPatcher
+from src.watermarkers.stegopatch import StegoPatch
 from src.noisers.rosteals_noiser import RoSteALSNoiser
 
 TRAINING = False
 
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
-IMAGE_SIZE = 256
-MESSAGE_LENGTH = 50
+PATCH_SIZE = 96
+MESSAGE_LENGTH = 20
 BATCH_SIZE = 8 if TRAINING else 4
 
 C_IMAGE = 3
-H_IMAGE = IMAGE_SIZE
-W_IMAGE = IMAGE_SIZE
-H_LITTLE = IMAGE_SIZE / 8
-W_LITTLE = IMAGE_SIZE / 8
+H_LITTLE = PATCH_SIZE / 8
+W_LITTLE = PATCH_SIZE / 8
 C_LITTLE = 3
 ALPHA = 1.5
 BETA_MIN = 0.1
 BETA_MAX = 10
 BETA_DELTA = (BETA_MAX - BETA_MIN) / 5_000 # just from observation, it seems like 5k steps till convergence roughly
-NUM_EPOCHS_FOR_LARGE_BATCH = 8
-NUM_EPOCHS_FOR_SMALL_BATCH = 200_000
 LEARNING_RATE = 2e-5
 FIRST_EXPOSURE_SIZE = 8
 SECOND_EXPOSURE_SIZE = 50_000
 TRAINING_DATA_SIZE = 100_000
 LOG_TENSORBOARD = True if TRAINING else False
-P_DIFFENTIABLE = 0.45
-P_IMAGENET = 0.45
-P_IDENTITY = 0.1
 
 
 def get_default_device() -> str:
@@ -71,20 +64,13 @@ def build_configs(
     dataset = utils.NpyImageDataset(data_path)
     dataset = Subset(dataset, range(TRAINING_DATA_SIZE))
     test_set = utils.NpyImageDataset(test_set_path) if test_set_path is not None else None
-    noiser = RoSteALSNoiser({
-        "p_differentiable": P_DIFFENTIABLE,
-        "p_imagenet": P_IMAGENET,
-        "p_identity": P_IDENTITY,
-        "w_image": IMAGE_SIZE,
-        "h_image": IMAGE_SIZE
-    })
+    noiser = None
     return {
         "device": device,
         "autoencoder_type": "VQGAN",
         "message_length": MESSAGE_LENGTH,
+        "patch_size": PATCH_SIZE,
         "c_image": C_IMAGE,
-        "h_image": H_IMAGE,
-        "w_image": W_IMAGE,
         "h_little": H_LITTLE,
         "w_little": W_LITTLE,
         "c_little": C_LITTLE,
@@ -95,8 +81,6 @@ def build_configs(
         "learning_rate": LEARNING_RATE,
         "dataset": dataset,
         "test_set": test_set,
-        "num_epochs": NUM_EPOCHS_FOR_LARGE_BATCH,
-        "num_epochs_for_small_batch": NUM_EPOCHS_FOR_SMALL_BATCH,
         "batch_size": BATCH_SIZE,
         "training_data_sizes": {
             0: FIRST_EXPOSURE_SIZE,
@@ -106,36 +90,16 @@ def build_configs(
         "models_dir": models_dir,
         "tensorboard_log_dir": tensorboard_log_dir,
         "log_tensorboard": LOG_TENSORBOARD,
-        "noiser": noiser
+        "noiser": None
     }
 
-
-def _build_rosteals(
+def _build_stegopatch(
     data_path: Path,
     device: str | None,
     models_dir: str,
     tensorboard_log_dir: str,
     test_set_path: Path | None = None
-) -> RoSteALS:
-    """Builds a RoSteALS with the standard training configs and dataset.
-
-    Args:
-        data_path: Path to the .npy file holding the training images.
-        device: Torch device to run on (e.g. "cuda" or "cpu"); if None, the
-            default device is auto-selected.
-        models_dir: Directory where model checkpoints are saved and loaded.
-        tensorboard_log_dir: Directory where TensorBoard logs are written.
-    """
-    configs = build_configs(data_path, device, models_dir, tensorboard_log_dir, test_set_path)
-    return RoSteALS(configs)
-
-def _build_rosteals_patcher(
-    data_path: Path,
-    device: str | None,
-    models_dir: str,
-    tensorboard_log_dir: str,
-    test_set_path: Path | None = None
-) -> RoSteALS:
+) -> StegoPatch:
     """Builds a RoSteALSPatcher with the standard training configs and dataset.
 
     Args:
@@ -146,7 +110,7 @@ def _build_rosteals_patcher(
         tensorboard_log_dir: Directory where TensorBoard logs are written.
     """
     configs = build_configs(data_path, device, models_dir, tensorboard_log_dir, test_set_path)
-    return RoSteALSPatcher(configs)
+    return StegoPatch(configs)
 
 
 def main(
@@ -155,19 +119,17 @@ def main(
     models_dir: str,
     tensorboard_log_dir: str,
 ):
-    rosteals = _build_rosteals_patcher(
+    stegopatch = _build_stegopatch(
         data_path,
         device,
         models_dir,
         tensorboard_log_dir
     )
-    rosteals.load_model(
-        "results/experiment_1/models/rosteals_2026-06-18_19-27-00/checkpoint4.pt"
-    )
-    cover: np.ndarray = utils.load_random_image(DATA_DIR)
+    
+    cover: np.ndarray = utils.load_random_image(DATA_DIR, size = 2*PATCH_SIZE)
     message: np.ndarray = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
-    stego = rosteals.encode_image(cover, message)
-    image_plotting.plot_side_by_side(cover, stego, Path("results/experiment_1/plots"))
+    stego = stegopatch.encode_image(cover, message)
+    image_plotting.plot_side_by_side(cover, stego, Path("results/stegopatch/plots"))
 
 
 

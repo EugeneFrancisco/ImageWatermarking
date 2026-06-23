@@ -6,8 +6,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 # pylint: disable=import-error  # Modules resolve when run from the repo root.
-from src.watermarkers.image_watermarker import ImageWatermarker
-from main import IMAGE_SIZE, MESSAGE_LENGTH, _build_rosteals
 
 # Directory where the cover/stego image plots are saved.
 PLOT_SAVE_DIR = Path("results/experiment_1/plots")
@@ -56,38 +54,3 @@ def plot_side_by_side(image_1: np.ndarray, image_2: np.ndarray, save_path: Path)
         ax.axis("off")
     fig.savefig(save_path / "side_by_side.png", bbox_inches="tight")
     plt.close(fig)
-
-def main():
-    """Encodes a cover image with each checkpoint's model and saves the stego plots."""
-    # Dictionary where keys are the checkpoints that the models refer to and values are the
-    # paths to the model .pt files.
-    paths = {
-        "Warmup 1": "results/experiment_1/models/rosteals_2026-06-18_07-07-57/checkpoint1.pt",
-        "Warmup 2": "results/experiment_1/models/rosteals_2026-06-18_15-40-02/checkpoint2.pt",
-        "Exposure 1": "results/experiment_1/models/rosteals_2026-06-18_16-39-39/checkpoint3.pt",
-        "Exposure 2": "results/experiment_1/models/rosteals_2026-06-18_19-27-00/checkpoint4.pt",
-        "Noising": "results/experiment_1/models/rosteals_2026-06-21_02-20-52/checkpoint5_epoch_1.pt"
-    }
-
-    rosteals: ImageWatermarker = _build_rosteals(
-        data_path="data/train2017_numpy_256.npy",
-        device="mps",
-        models_dir=None,
-        tensorboard_log_dir=None
-    )
-
-    cover: np.ndarray = load_face_image(IMAGE_PATH, IMAGE_SIZE)
-    message: np.ndarray = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
-
-    save_image_plot(cover, "Original cover image", "cover.png")
-
-    for checkpoint, path in paths.items():
-        rosteals.load_model(path)
-        stego: np.ndarray = rosteals.encode_image(cover, message)
-        # Use a filesystem-safe version of the checkpoint name for the filename.
-        slug = checkpoint.lower().replace(" ", "_")
-        save_image_plot(stego, f"Stego image: {checkpoint}", f"stego_{slug}.png")
-
-
-if __name__ == "__main__":
-    main()

@@ -11,6 +11,8 @@ values in ``[0, 1]`` and latents are ``(B, 3, H // 4, W // 4)`` tensors, both on
 the model's device. ``encode``/``decode`` are differentiable so gradients flow
 through the (frozen) autoencoder to the watermarker during training.
 """
+from pathlib import Path
+
 import torch
 from diffusers import VQModel
 
@@ -24,13 +26,34 @@ class VQGAN(AutoEncoder):
     SHRINK_FACTOR = 4
     LATENT_CHANNELS = 3
 
+    # Where the converted checkpoint is saved on first use so later runs load it
+    # straight from disk instead of hitting the Hugging Face Hub.
+    LOCAL_DIR = Path("models/ldm-vq-f4")
+
     def __init__(self, device: str | None = None):
         self.device = torch.device(device or self._default_device())
         # Frozen in RoSteALS: eval mode + no parameter grads. Gradients still flow
         # *through* the autoencoder to the message encoder during training; the
         # autoencoder's own weights just never update.
-        self.model = VQModel.from_pretrained(self.MODEL_ID).eval().requires_grad_(False)
+        self.model = self._load_model().eval().requires_grad_(False)
         self.model = self.model.to(self.device)
+
+    @classmethod
+    def _load_model(cls) -> VQModel:
+        """
+        Loads the vq-f4 weights, preferring a one-time local copy.
+
+        On the first run the checkpoint is fetched from the Hub and saved to
+        ``LOCAL_DIR``; every later run loads from that directory and skips the
+        Hub entirely.
+        """
+        if cls.LOCAL_DIR.exists():
+            return VQModel.from_pretrained(cls.LOCAL_DIR)
+
+        model = VQModel.from_pretrained(cls.MODEL_ID)
+        cls.LOCAL_DIR.parent.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(cls.LOCAL_DIR)
+        return model
 
     @staticmethod
     def _default_device() -> str:

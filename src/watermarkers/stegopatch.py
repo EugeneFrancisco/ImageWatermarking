@@ -1,8 +1,9 @@
 """
-This file defines the StegPatch Watermarking class.
+This file defines the StegoPatch Watermarking class.
 """
 from datetime import datetime
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, Subset, DataLoader
@@ -14,9 +15,9 @@ from src.autoencoders.autoencoder import AutoEncoder
 from src.autoencoders.vqgan import VQGAN
 from src.noisers.noiser import Noiser
 
-class StegPatch(ImageWatermarker):
+class StegoPatch(ImageWatermarker):
     """
-    This class defines the Steg Patch watermarker which is a variant of RoSteALS in that it
+    This class defines the Stego Patch watermarker which is a variant of RoSteALS in that it
     watermarks images in patches. Specifically, it watermarks an cover c and message m in the
     following way. First, C is split up into "patches" of a fixed square side. Each patch p
     is watermarked using the same technique as in RoSteALS: it is passed through an autoencoder E
@@ -49,9 +50,9 @@ class StegPatch(ImageWatermarker):
         self.w_little: int = int(self.configs["w_little"])
         self.c_little: int = int(self.configs["c_little"])
 
-        self.message_encoder: torch.Module = self.setup_message_encoder().to(self.device)
+        self.message_encoder: nn.Module = self.setup_message_encoder().to(self.device)
 
-        self.secret_decoder: torch.Module = self.setup_secret_decoder().to(self.device)
+        self.secret_decoder: nn.Module = self.setup_secret_decoder().to(self.device)
 
         # ============ Noising Material ===========
 
@@ -131,7 +132,7 @@ class StegPatch(ImageWatermarker):
         # ====== validation material =========
         self.test_set = self.configs.get("test_set", None)
 
-    def setup_message_encoder(self) -> torch.Module:
+    def setup_message_encoder(self) -> nn.Module:
         """
         This sets up the message encoder. The message encoder is a neural network which takes in as
         input a message of length message_length and outputs a delta in the latent space that can be
@@ -156,7 +157,7 @@ class StegPatch(ImageWatermarker):
 
         return nn.Sequential(*layers)
 
-    def setup_secret_decoder(self) -> torch.Module:
+    def setup_secret_decoder(self) -> nn.Module:
         """
         This sets up the secret decoder. The secret decoder is a neural network which takes as
         input a full size image and outputs a prediction for the encoded message. It does this
@@ -201,6 +202,19 @@ class StegPatch(ImageWatermarker):
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
         )
+
+    def encode_image(self, cover: np.ndarray, message: np.ndarray) -> np.ndarray:
+        cover_t = torch.from_numpy(cover)
+        cover_t = cover_t.unsqueeze(0)
+        cover_t = cover_t.permute(0, 3, 1, 2)
+        cover_t = cover_t.to(self.device)
+        message = message.reshape(1, self.message_length)
+        message_t = torch.from_numpy(message).float()
+        message_t = message_t.to(self.device)
+        stego = self.encode_batch(cover_t, message_t)
+        stego = stego.squeeze(0)
+        stego = stego.permute(1, 2, 0)
+        return stego.detach().cpu().numpy()
 
     def encode_batch(self, covers: torch.Tensor, messages: torch.Tensor) -> torch.Tensor:
         """
@@ -266,8 +280,21 @@ class StegPatch(ImageWatermarker):
 
         return watermarked
 
+    def decode_image(self, stego_image: np.ndarray) -> np.ndarray:
+        stego_image_t = torch.from_numpy(stego_image)
+        stego_image_t = stego_image_t.permute(0, 3, 1, 2)
+        stego_image_t = stego_image_t.to(self.device)
+        message = self.decode_batch(stego_image_t)
+        return message.detach().cpu().numpy()
+
     def decode_batch(self, stego_images: torch.Tensor) -> torch.Tensor:
         """
         Returns the decoded messages from a batch of stego images.
         """
         return self.secret_decoder(stego_images)
+
+    def train(self):
+        pass
+
+    def validate(self):
+        pass
