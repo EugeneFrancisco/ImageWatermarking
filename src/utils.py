@@ -39,10 +39,16 @@ def list_images(data_dir: Path) -> tuple[Path, ...]:
     return tuple(data_dir.glob("*.jpg"))
 
 
-def load_random_image(data_dir: Path, size: int) -> np.ndarray:
-    """Loads a random image as an (H, W, C) float array in [0, 1], resized to a square."""
+def load_random_image(data_dir: Path, size: int | None = None) -> np.ndarray:
+    """Loads a random image as an (H, W, C) float array in [0, 1].
+
+    If ``size`` is given the image is resized to a ``size`` x ``size`` square;
+    otherwise it is returned at its original resolution.
+    """
     path = random.choice(list_images(data_dir))
-    image = Image.open(path).convert("RGB").resize((size, size))
+    image = Image.open(path).convert("RGB")
+    if size is not None:
+        image = image.resize((size, size))
     return np.asarray(image, dtype=np.float32) / 255.0
 
 

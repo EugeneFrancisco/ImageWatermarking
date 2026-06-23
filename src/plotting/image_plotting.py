@@ -5,6 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+# pylint: disable=import-error  # Modules resolve when run from the repo root.
 from src.watermarkers.image_watermarker import ImageWatermarker
 from main import IMAGE_SIZE, MESSAGE_LENGTH, _build_rosteals
 
@@ -28,7 +29,7 @@ def load_face_image(path: Path, size: int) -> np.ndarray:
     left = (image.width - side) // 2
     top = (image.height - side) // 2
     image = image.crop((left, top, left + side, top + side))
-    image = image.resize((size, size), Image.BOX)
+    image = image.resize((size, size), Image.BOX)  # pylint: disable=no-member
     return np.asarray(image, dtype=np.float32) / 255.0
 
 
@@ -42,8 +43,23 @@ def save_image_plot(image: np.ndarray, title: str, filename: str) -> None:
     fig.savefig(PLOT_SAVE_DIR / filename, bbox_inches="tight")
     plt.close(fig)
 
+def plot_side_by_side(image_1: np.ndarray, image_2: np.ndarray, save_path: Path) -> None:
+    """
+    Plots a single png of image_1 on the left and image_2 on the right side by side and saves the
+    image to the save_path folder.
+    """
+    assert image_1.shape == image_2.shape
+    save_path.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 2)
+    for ax, image in zip(axes, (image_1, image_2)):
+        ax.imshow(np.clip(image, 0.0, 1.0))
+        ax.axis("off")
+    fig.savefig(save_path / "side_by_side.png", bbox_inches="tight")
+    plt.close(fig)
+
 def main():
-    # Dictionary where keys are the checkpoints that the models refer to and values are the 
+    """Encodes a cover image with each checkpoint's model and saves the stego plots."""
+    # Dictionary where keys are the checkpoints that the models refer to and values are the
     # paths to the model .pt files.
     paths = {
         "Warmup 1": "results/experiment_1/models/rosteals_2026-06-18_07-07-57/checkpoint1.pt",

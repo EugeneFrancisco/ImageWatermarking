@@ -14,7 +14,7 @@
 
 \maketitle
 \section*{Overview}
-This writeup describes my implementation of Bui et al.'s\footnote{https://arxiv.org/pdf/2304.03400} RoSteALS technique for image watermarking. I include some deeper training details and some findings during training which the original paper did not discuss.
+This writeup describes my implementation of Bui et al.'s\footnote{https://arxiv.org/pdf/2304.03400} RoSteALS technique for image watermarking. I include some deeper training details and some findings during training which the original paper did not discuss. My code can be found here.\footnote{https://github.com/EugeneFrancisco/ImageWatermarking}
 
 As an overview of the technique, RoSteALS embeds watermarks into a cover image by using an image autoencoder and embedding information within the cover image's latent representation. More formally, let $E, G$ be an autoencoder. For a high fidelity image $c\in \R^{H\times W\times C}$, let $E(c) = z\in \R^{H'\times W'\times C}$ be $c$'s latent representation. For a latent variable $z\in \in \R^{H'\times W'\times C}$, let $G(z)\in \R^{H\times W\times C}$ be the generated image from the auto encoder.
 
@@ -103,6 +103,39 @@ Loading the model with ImageNet weights was also critical to training; I tried a
 After inserting noise, there is a clear compromise with image quality that is made as can be seen in Figure~\ref{fig:images}. In Bui et al's paper, the post-noising watermarks are much less obvious which I attribute to more training time post-noising. However, the \textit{Exposure 2} watermarks are almost invisible with a few notable failure cases.
 
 All watermarking models struggle with human faces and with text (see bottom Figure~\ref{fig:images}). These defects essentially disappear for faces and are slightly alleviated for text once these subjects are larger in the image, suggested that these watermarks fare best with higher resolutions (Figure~\ref{fig:images} row 4 and 5).
+
+Bit accuracy and quality loss across different transformations applied to the COCO test set from 2017 is below.
+\begin{table}[h]
+\centering
+\begin{tabular}{lc}
+\hline
+Metric & Value \\
+\hline
+Quality Loss & 0.050 \\
+\hline
+\multicolumn{2}{l}{\textit{Bit Accuracy}} \\
+\hline
+Identity & 0.996 \\
+Differentiable & 0.985 \\
+Gaussian Noise & 0.886 \\
+Shot Noise & 0.894 \\
+Impulse Noise & 0.877 \\
+Defocus Blur & 0.986 \\
+Fog & 0.991 \\
+Brightness & 0.992 \\
+Contrast & 0.978 \\
+Elastic Transform & 0.730 \\
+Pixelate & 0.995 \\
+JPEG Compression & 0.837 \\
+Speckle Noise & 0.924 \\
+Gaussian Blur & 0.987 \\
+Spatter & 0.988 \\
+Saturate & 0.986 \\
+\hline
+\end{tabular}
+\caption{Test results for Experiment 1.}
+\label{tab:experiment_1}
+\end{table}
 
 
 

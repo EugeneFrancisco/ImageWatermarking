@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 from torch.utils.data import Subset
 
 import src.utils as utils
-from src.watermarkers.rosteals import RoSteALS
+import src.plotting.image_plotting as image_plotting
+from src.watermarkers.rosteals import RoSteALS, RoSteALSPatcher
 from src.noisers.rosteals_noiser import RoSteALSNoiser
 
 TRAINING = False
@@ -128,6 +129,25 @@ def _build_rosteals(
     configs = build_configs(data_path, device, models_dir, tensorboard_log_dir, test_set_path)
     return RoSteALS(configs)
 
+def _build_rosteals_patcher(
+    data_path: Path,
+    device: str | None,
+    models_dir: str,
+    tensorboard_log_dir: str,
+    test_set_path: Path | None = None
+) -> RoSteALS:
+    """Builds a RoSteALSPatcher with the standard training configs and dataset.
+
+    Args:
+        data_path: Path to the .npy file holding the training images.
+        device: Torch device to run on (e.g. "cuda" or "cpu"); if None, the
+            default device is auto-selected.
+        models_dir: Directory where model checkpoints are saved and loaded.
+        tensorboard_log_dir: Directory where TensorBoard logs are written.
+    """
+    configs = build_configs(data_path, device, models_dir, tensorboard_log_dir, test_set_path)
+    return RoSteALSPatcher(configs)
+
 
 def main(
     data_path: Path,
@@ -135,26 +155,20 @@ def main(
     models_dir: str,
     tensorboard_log_dir: str,
 ):
-    rosteals = _build_rosteals(
+    rosteals = _build_rosteals_patcher(
         data_path,
         device,
         models_dir,
-        tensorboard_log_dir,
-        Path("data/test2017_numpy_256.npy")
+        tensorboard_log_dir
     )
     rosteals.load_model(
-        "results/experiment_1/models/rosteals_2026-06-21_02-20-52/checkpoint5_epoch_1.pt"
+        "results/experiment_1/models/rosteals_2026-06-18_19-27-00/checkpoint4.pt"
     )
-    test_results = rosteals.validate()
-    print(test_results)
+    cover: np.ndarray = utils.load_random_image(DATA_DIR)
+    message: np.ndarray = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
+    stego = rosteals.encode_image(cover, message)
+    image_plotting.plot_side_by_side(cover, stego, Path("results/experiment_1/plots"))
 
-    # Placeholder output path -- change this to wherever you want the results saved.
-    results_path = Path("results/experiment_1/test_results.txt")
-    results_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(results_path, "w", encoding="utf-8") as f:
-        for name, value in test_results.items():
-            f.write(f"{name}: {value}\n")
-    print(f"Wrote validation results to {results_path}")
 
 
 
