@@ -11,7 +11,7 @@ import src.plotting.image_plotting as image_plotting
 from src.watermarkers.stegopatch import StegoPatch
 from src.noisers.rosteals_noiser import RoSteALSNoiser
 
-TRAINING = False
+TRAINING = True
 
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
@@ -125,11 +125,7 @@ def main(
         models_dir,
         tensorboard_log_dir
     )
-    
-    cover: np.ndarray = utils.load_random_image(DATA_DIR, size = 2*PATCH_SIZE)
-    message: np.ndarray = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
-    stego = stegopatch.encode_image(cover, message)
-    image_plotting.plot_side_by_side(cover, stego, Path("results/stegopatch/plots"))
+    stegopatch.train()
 
 
 

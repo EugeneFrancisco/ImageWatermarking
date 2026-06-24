@@ -90,7 +90,13 @@ def precompute_image_tensors(data_dir: Path, out_path: Path, size: int) -> None:
         out_path, mode="w+", dtype=np.uint8, shape=(len(paths), 3, size, size)
     )
     for i, path in enumerate(tqdm(paths)):
-        image = Image.open(path).convert("RGB").resize((size, size))
+        image = Image.open(path).convert("RGB")
+        # Center-crop the longer side away so the image is square (preserving aspect
+        # ratio), then downsample to the target resolution without further cropping.
+        side = min(image.size)
+        left = (image.width - side) // 2
+        top = (image.height - side) // 2
+        image = image.crop((left, top, left + side, top + side)).resize((size, size))
         array[i] = np.asarray(image, dtype=np.uint8).transpose(2, 0, 1)  # (C, size, size)
     array.flush()
 
