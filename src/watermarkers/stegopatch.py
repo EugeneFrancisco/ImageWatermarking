@@ -415,6 +415,103 @@ class StegoPatch(ImageWatermarker):
         )
         self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint5.pt")
 
+    def restart_training(self, save_path: str, checkpoint: int) -> None:
+        """
+        Resumes training from the weights saved at ``save_path``, picking the
+        curriculum back up at the given ``checkpoint`` phase and running every
+        phase from there to the end. Mirrors :meth:`train` but skips the phases
+        that precede ``checkpoint``.
+
+        Args:
+            save_path: path to a .pt file saved by :meth:`save_model` (weights,
+                optimizer state, and beta-schedule progress).
+            checkpoint: which curriculum phase to resume at, one of 1, 2, 3, or 4:
+                1 - reveal the model to (about half) the training set; prioritize
+                    recovery (no beta ramp yet) until bit accuracy reaches 0.8.
+                2 - begin ramping beta from beta_min to beta_max until 0.95.
+                3 - expose the full training set until bit accuracy reaches 0.98.
+                4 - turn on the full noise blend and finish training.
+        """
+        assert checkpoint in (1, 2, 3, 4)
+
+        # Restore weights, optimizer state, and the beta schedule progress.
+        self.load_model(save_path)
+
+        self.secret_decoder.train()
+        self.message_encoder.train()
+
+        # Timestamp of when this resumed run started, used to name new checkpoints.
+        start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+        # Cropping is enabled from the very first checkpoint, so every phase we can
+        # resume into (1-4) trains against crops.
+        self.begin_cropping = True
+
+        # Around half of the training data, matching the corresponding phases in train.
+        second_dataset = Subset(
+            self.dataset,
+            range(min(self.second_exposure_set_size, len(self.dataset)))
+        )
+
+        if checkpoint == 1:
+            # =================== Checkpoint 1 begins =================
+            # Reveal the model to a much larger portion of the data. update_flag is
+            # False so we still prioritize recovery; train until bit accuracy 0.8.
+            self.update_flag = False
+            self.train_until(
+                second_dataset,
+                bit_accuracy_threshold=0.8,
+                progress_bar="step",
+                save_every_epoch=True,
+                start_time=start_time,
+                checkpoint=1,
+            )
+            self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint2.pt")
+
+        if checkpoint in (1, 2):
+            # =================== Checkpoint 2 begins =================
+            # Start ramping beta from beta_min to beta_max until bit accuracy 0.95.
+            self.update_flag = True
+            self.train_until(
+                second_dataset,
+                bit_accuracy_threshold=0.95,
+                progress_bar="step",
+                save_every_epoch=True,
+                start_time=start_time,
+                checkpoint=2,
+            )
+            self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint3.pt")
+
+        if checkpoint in (1, 2, 3):
+            # =================== Checkpoint 3 begins =================
+            # Expose the model to the full training set until bit accuracy 0.98. The
+            # beta ramp is finished by now, so pin beta at its max.
+            self.beta = self.beta_max
+            self.train_until(
+                self.dataset,
+                bit_accuracy_threshold=0.98,
+                progress_bar="step",
+                save_every_epoch=True,
+                start_time=start_time,
+                checkpoint=3,
+            )
+            self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint4.pt")
+
+        # =================== Checkpoint 4 begins =================
+        # Turn on the full noise blend (differentiable + imagenet-c, alongside
+        # cropping) to finish training for robustness.
+        self.beta = self.beta_max
+        self.begin_noising = True
+        self.train_until(
+            self.dataset,
+            max_epochs=5,
+            progress_bar="step",
+            save_every_epoch=True,
+            start_time=start_time,
+            checkpoint=4,
+        )
+        self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint5.pt")
+
     def save_model(self, path: str) -> None:
         """
         Saves the trainable network weights (message encoder and secret decoder)
@@ -504,16 +601,11 @@ class StegoPatch(ImageWatermarker):
 
                 stego_images = self.encode_batch(covers, messages)
 
-                # Quality is always measured against the clean watermarked image:
-                # the noise layer is a channel corruption used to train decoder
-                # robustness, not something the encoder should compensate for.
+                # Quality is always measured against the clean watermarked image (as opposed to
+                # the noised image).
                 loss_quality = self.get_quality_loss(covers, stego_images)
 
-                # Apply noise only to what the decoder sees, so robustness training
-                # does not leak into the quality loss. The full noise blend (once
-                # begin_noising is set) supersedes the cropping-only phase; before
-                # that, crop with probability self.crop_probability and otherwise
-                # leave the batch untouched.
+                # Apply noise only to what the decoder sees.
                 decoder_input = stego_images
                 if self.begin_noising:
                     decoder_input = self.noiser.apply_noise(stego_images)
