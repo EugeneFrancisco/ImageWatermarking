@@ -342,15 +342,17 @@ class StegoPatch(ImageWatermarker):
         # Train one or two mini batches of data until the 0.9 bit accuracy threshold is reached.
         # The baby_dataset contains only a couple minibatches worth of images so the max_epochs
         # here is large because we want to do many passes over those images.
-        baby_dataset = Subset(
-            self.dataset,
-            range(min(self.first_exposure_set_size, len(self.dataset)))
+        baby_indices = np.random.choice(
+            len(self.dataset),
+            size=min(self.first_exposure_set_size, len(self.dataset)),
+            replace=False
         )
+        baby_dataset = Subset(self.dataset, baby_indices.tolist())
         self.train_until(
             baby_dataset,
             bit_accuracy_threshold=0.9,
             max_epochs=self.num_epochs_for_small_batch,
-            save_every_epoch=True,
+            save_every_epoch=False,
             start_time=start_time,
             checkpoint=0
         )

@@ -13,7 +13,7 @@ One-time setup (upload the precomputed 384 training array to a Volume):
 
 Run training (prints a public TensorBoard URL near the top of the logs):
 
-    modal run modal_app.py
+    modal run modal_app.py::run
 
 Fetch the trained weights afterwards (timestamp is printed at the end of the run):
 

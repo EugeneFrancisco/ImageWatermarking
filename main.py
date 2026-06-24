@@ -15,7 +15,7 @@ DEBUGGING = 0
 TRAINING = 1
 TESTING = 2
 
-MODE = DEBUGGING
+MODE = TRAINING
 
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
