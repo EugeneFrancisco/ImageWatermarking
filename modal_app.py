@@ -192,7 +192,9 @@ def test(checkpoint_path: str = TEST_CHECKPOINT, results_path: str = TEST_RESULT
 
 @app.local_entrypoint()
 def run():
-    train.remote()
+    # .spawn() (not .remote()) so the run is fire-and-forget: it returns immediately
+    # and is not tied to — or cancelled with — the local client (works with --detach).
+    train.spawn()
 
 
 @app.local_entrypoint()
@@ -204,8 +206,15 @@ def resume(save_path: str = RESTART_CHECKPOINT, checkpoint: int = 1):
         modal run modal_app.py::resume
         modal run modal_app.py::resume --checkpoint 2
         modal run modal_app.py::resume --save-path /output/models/rosteals_.../checkpoint2.pt
+
+    To run detached (survives client disconnect), add --detach:
+
+        modal run --detach modal_app.py::resume
+
+    .spawn() (not .remote()) is used so the run is fire-and-forget: it returns
+    immediately and the call is not tied to — or cancelled with — the local client.
     """
-    restart.remote(save_path=save_path, checkpoint=checkpoint)
+    restart.spawn(save_path=save_path, checkpoint=checkpoint)
 
 
 @app.local_entrypoint()
@@ -218,5 +227,10 @@ def evaluate(checkpoint_path: str = TEST_CHECKPOINT, results_path: str = TEST_RE
 
         modal run modal_app.py::evaluate
         modal run modal_app.py::evaluate --checkpoint-path /output/models/rosteals_.../checkpoint5.pt
+
+    Uses .spawn() so the run is fire-and-forget and survives client disconnect
+    (works with --detach). Results are written to the rosteals-output volume, so
+    fetch them with `modal volume get` once the run finishes rather than reading
+    them inline.
     """
-    test.remote(checkpoint_path=checkpoint_path, results_path=results_path)
+    test.spawn(checkpoint_path=checkpoint_path, results_path=results_path)
