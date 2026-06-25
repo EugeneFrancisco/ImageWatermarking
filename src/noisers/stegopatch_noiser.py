@@ -138,6 +138,17 @@ class StegoPatchNoiser(RoSteALSNoiser):
         hr, wr = self._inscribed_hw(h, w, angle)
         return TF.center_crop(rotated, [hr, wr])
 
+    # -- per-noise evaluation ------------------------------------------------
+    def named_noise_functions(self) -> dict[str, Callable[[torch.Tensor], torch.Tensor]]:
+        """Extend the parent's per-noise-type map with the StegoPatch-specific crop and rotate
+        branches so bit accuracy can be measured against each independently. Each call still samples
+        fresh parameters (a random crop window, or an angle from
+        [rotation_lower_bound, rotation_upper_bound])."""
+        funcs = super().named_noise_functions()
+        funcs["crop"] = self._crop_noise
+        funcs["rotate"] = self._rotate_noise
+        return funcs
+
     # -- numpy entry point ---------------------------------------------------
     def apply_noise_np(self, image: np.ndarray, noise_type: Union[str, int]) -> np.ndarray:
         t = self._normalize_type(noise_type)

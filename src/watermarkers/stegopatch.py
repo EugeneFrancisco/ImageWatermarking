@@ -405,10 +405,10 @@ class StegoPatch(ImageWatermarker):
         # cropping) to finish training for robustness.
         self.noiser.set_probabilities(
             p_identity=0.1,
-            p_differentiable=0.25,
-            p_imagenet=0.25,
-            p_crop=0.25,
-            p_rotate=0.25
+            p_differentiable=0.225,
+            p_imagenet=0.225,
+            p_crop=0.225,
+            p_rotate=0.225
         )
         self.train_until(
             self.dataset,
@@ -514,10 +514,10 @@ class StegoPatch(ImageWatermarker):
         self.beta = self.beta_max
         self.noiser.set_probabilities(
             p_identity=0.1,
-            p_differentiable=0.25,
-            p_imagenet=0.25,
-            p_crop=0.25,
-            p_rotate=0.25
+            p_differentiable=0.225,
+            p_imagenet=0.225,
+            p_crop=0.225,
+            p_rotate=0.225
         )
         self.train_until(
             self.dataset,
