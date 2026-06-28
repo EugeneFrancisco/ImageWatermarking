@@ -21,6 +21,10 @@ class RoSteALSNoiser(Noiser):
     # RoSteALS training corruption ids, minus the ImageMagick-backed ones
     # (glass/motion/zoom blur, snow) and frost (needs bundled assets).
     _DEFAULT_CORRUPTIONS = DEFAULT_CORRUPTION_IDS
+    # Reverse of CORRUPTION_NAMES (id -> name): maps a corruption's name back to
+    # its id so callers can request a corruption by the same name used in
+    # named_noise_functions.
+    _CORRUPTION_NAME_TO_ID = {name: cid for cid, name in CORRUPTION_NAMES.items()}
     # standard luma weights, used for the saturation blend
     _LUMA = (0.299, 0.587, 0.114)
 
@@ -140,17 +144,25 @@ class RoSteALSNoiser(Noiser):
         # straight-through: forward = corrupted, backward = identity
         return x + (corrupted - x.detach())
 
-    def _imagenet_corrupt_batch(self, x: torch.Tensor, corruption_id: int) -> torch.Tensor:
-        """Apply a single fixed imagenet-c corruption (random severity per image)
-        to a (B, C, H, W) batch. Same straight-through behaviour as
-        _imagenet_noise, but every image gets the same corruption type so the
-        result can be attributed to that one corruption."""
+    def _imagenet_corrupt_batch(
+        self, x: torch.Tensor, corruption_id: int, severity: int | None = None
+    ) -> torch.Tensor:
+        """Apply a single fixed imagenet-c corruption to a (B, C, H, W) batch. Same
+        straight-through behaviour as _imagenet_noise, but every image gets the same
+        corruption type so the result can be attributed to that one corruption.
+
+        When ``severity`` is None a random severity in ``severity_range`` is sampled
+        per image; otherwise the given fixed severity (1-5) is used for every image."""
         x_np = (x.detach().clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
         x_np = x_np.transpose(0, 2, 3, 1)  # (B, H, W, C)
 
         lo, hi = self.severity_range
         out = [
-            self._corrupt_single(img, corruption_id, int(np.random.randint(lo, hi + 1)))
+            self._corrupt_single(
+                img,
+                corruption_id,
+                severity if severity is not None else int(np.random.randint(lo, hi + 1)),
+            )
             for img in x_np
         ]
         out = np.stack(out).astype(np.float32) / 255.0
@@ -158,6 +170,22 @@ class RoSteALSNoiser(Noiser):
 
         corrupted = torch.from_numpy(out).to(x.device)
         return x + (corrupted - x.detach())
+
+    def noise_function_at_severity(
+        self, noise_type: Union[str, int], severity: int
+    ) -> Callable[[torch.Tensor], torch.Tensor]:
+        """Return a (B, C, H, W) -> (B, C, H, W) function applying ``noise_type`` at a
+        fixed ``severity``. Only the imagenet-c corruptions (the names in
+        named_noise_functions that come from CORRUPTION_NAMES, e.g. "jpeg_compression")
+        carry a severity; any other noise type has no severity knob and raises."""
+        key = noise_type.lower() if isinstance(noise_type, str) else noise_type
+        if key not in self._CORRUPTION_NAME_TO_ID:
+            raise ValueError(
+                f"Noise type {noise_type!r} does not support a fixed severity; "
+                f"pass None for it instead."
+            )
+        cid = self._CORRUPTION_NAME_TO_ID[key]
+        return lambda x: self._imagenet_corrupt_batch(x, cid, severity)
 
     def named_noise_functions(self) -> dict[str, Callable[[torch.Tensor], torch.Tensor]]:
         """Map each individual noise type to a function applying just that noise to

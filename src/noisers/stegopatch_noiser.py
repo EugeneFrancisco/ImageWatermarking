@@ -13,10 +13,43 @@ import torchvision.transforms.functional as TF
 from src.noisers.rosteals_noiser import RoSteALSNoiser
 
 
+# Canonical noise-type names. These are exactly the keys of
+# ``named_noise_functions`` and the names accepted by ``noise_function_at_severity``
+# and ``evaluate_noise_robustness``; use these constants instead of string literals.
+
+# Structural noise types defined by the noiser classes themselves.
+NOISE_IDENTITY = "identity"
+NOISE_DIFFERENTIABLE = "differentiable"
+NOISE_IMAGENET = "imagenet"
+NOISE_CROP = "crop"
+NOISE_ROTATE = "rotate"
+
+# Individual imagenet-c corruptions (the only noise types that carry a severity).
+# Each name matches the corresponding function name in imagenet_corruptions.py.
+NOISE_GAUSSIAN_NOISE = "gaussian_noise"
+NOISE_SHOT_NOISE = "shot_noise"
+NOISE_IMPULSE_NOISE = "impulse_noise"
+NOISE_DEFOCUS_BLUR = "defocus_blur"
+NOISE_FOG = "fog"
+NOISE_BRIGHTNESS = "brightness"
+NOISE_CONTRAST = "contrast"
+NOISE_ELASTIC_TRANSFORM = "elastic_transform"
+NOISE_PIXELATE = "pixelate"
+NOISE_JPEG_COMPRESSION = "jpeg_compression"
+NOISE_SPECKLE_NOISE = "speckle_noise"
+NOISE_GAUSSIAN_BLUR = "gaussian_blur"
+NOISE_SPATTER = "spatter"
+NOISE_SATURATE = "saturate"
+
+
 class StegoPatchNoiser(RoSteALSNoiser):
     CROP = 3
     ROTATE = 4
-    _NAME_TO_INT = {**RoSteALSNoiser._NAME_TO_INT, "crop": CROP, "rotate": ROTATE}
+    _NAME_TO_INT = {
+        **RoSteALSNoiser._NAME_TO_INT,
+        NOISE_CROP: CROP,
+        NOISE_ROTATE: ROTATE,
+    }
 
     def __init__(self, configs: dict):
         super().__init__(configs)
@@ -58,11 +91,11 @@ class StegoPatchNoiser(RoSteALSNoiser):
     # -- type normalisation --------------------------------------------------
     def _normalize_type(self, noise_type: Union[str, int]) -> int:
         if noise_type == self.CROP or (
-            isinstance(noise_type, str) and noise_type.lower() == "crop"
+            isinstance(noise_type, str) and noise_type.lower() == NOISE_CROP
         ):
             return self.CROP
         if noise_type == self.ROTATE or (
-            isinstance(noise_type, str) and noise_type.lower() == "rotate"
+            isinstance(noise_type, str) and noise_type.lower() == NOISE_ROTATE
         ):
             return self.ROTATE
         return super()._normalize_type(noise_type)
@@ -121,13 +154,18 @@ class StegoPatchNoiser(RoSteALSNoiser):
         # rotated frame edge) is excluded, leaving only clean interior pixels.
         return max(1, int(math.floor(hr)) - 1), max(1, int(math.floor(wr)) - 1)
 
-    def _rotate_noise(self, x: torch.Tensor) -> torch.Tensor:
-        """Rotate the whole (B, C, H, W) batch by a single angle sampled uniformly from
-        [rotation_lower_bound, rotation_upper_bound] degrees (counter-clockwise), then centre-crop
-        to the largest rectangle of real image pixels. This "zooms in" so no black corners remain;
-        the spatial dimensions shrink as the rotation angle grows. Bilinear interpolation and the
-        slice-based crop are both differentiable, so gradients flow back to the input pixels."""
-        angle = float(np.random.uniform(self.rotation_lower_bound, self.rotation_upper_bound))
+    def _rotate_noise(self, x: torch.Tensor, angle: float | None = None) -> torch.Tensor:
+        """Rotate the whole (B, C, H, W) batch by a single angle (counter-clockwise), then
+        centre-crop to the largest rectangle of real image pixels. This "zooms in" so no black
+        corners remain; the spatial dimensions shrink as the rotation angle grows. Bilinear
+        interpolation and the slice-based crop are both differentiable, so gradients flow back to
+        the input pixels.
+
+        When ``angle`` is None the angle is sampled uniformly from
+        [rotation_lower_bound, rotation_upper_bound] degrees; otherwise the given fixed angle (in
+        degrees) is used."""
+        if angle is None:
+            angle = float(np.random.uniform(self.rotation_lower_bound, self.rotation_upper_bound))
         rotated = TF.rotate(
             x,
             angle=angle,
@@ -138,6 +176,13 @@ class StegoPatchNoiser(RoSteALSNoiser):
         hr, wr = self._inscribed_hw(h, w, angle)
         return TF.center_crop(rotated, [hr, wr])
 
+    def rotate_function_at_angle(
+        self, angle: float
+    ) -> Callable[[torch.Tensor], torch.Tensor]:
+        """Return a (B, C, H, W) -> (B, C, H, W) function rotating by the fixed ``angle``
+        (in degrees, counter-clockwise) rather than a randomly sampled one."""
+        return lambda x: self._rotate_noise(x, angle=angle)
+
     # -- per-noise evaluation ------------------------------------------------
     def named_noise_functions(self) -> dict[str, Callable[[torch.Tensor], torch.Tensor]]:
         """Extend the parent's per-noise-type map with the StegoPatch-specific crop and rotate
@@ -145,8 +190,8 @@ class StegoPatchNoiser(RoSteALSNoiser):
         fresh parameters (a random crop window, or an angle from
         [rotation_lower_bound, rotation_upper_bound])."""
         funcs = super().named_noise_functions()
-        funcs["crop"] = self._crop_noise
-        funcs["rotate"] = self._rotate_noise
+        funcs[NOISE_CROP] = self._crop_noise
+        funcs[NOISE_ROTATE] = self._rotate_noise
         return funcs
 
     # -- numpy entry point ---------------------------------------------------

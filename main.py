@@ -10,7 +10,13 @@ import src.utils as utils
 import src.plotting.image_plotting as image_plotting
 from src.watermarkers.stegopatch import StegoPatch
 from src.watermarkers.stegopatch_legacy import StegoPatchLegacy
-from src.noisers.stegopatch_noiser import StegoPatchNoiser
+from src.noisers.stegopatch_noiser import (
+    StegoPatchNoiser,
+    NOISE_JPEG_COMPRESSION,
+    NOISE_CROP,
+    NOISE_ROTATE,
+    NOISE_DIFFERENTIABLE,
+)
 
 DEBUGGING = 0
 TRAINING = 1
@@ -168,12 +174,35 @@ def main(
     models_dir: str,
     tensorboard_log_dir: str,
 ):
-    stegopatch = _build_stegopatch(
-        data_path,
-        device,
-        models_dir,
-        tensorboard_log_dir,
-        )
+    stegopatch = _build_stegopatch(data_path, device, models_dir, tensorboard_log_dir)
+    stegopatch.load_model("results/stegopatch/experiment_2/models/stegopatch_2026-06-27_15-57-27/checkpoint4_epoch_2.pt")
+    cover = image_plotting.load_image(
+        Path("data/sample_images/stella/final-herbet-hero.png"),
+        2*IMAGE_SIZE,
+        2*IMAGE_SIZE,
+    )
+    message = np.empty(MESSAGE_LENGTH)
+    for i in range(MESSAGE_LENGTH):
+        if i % 2:
+            message[i] = 0
+        else:
+            message[i] = 1
+
+    stegopatch.evaluate_noise_robustness(
+        cover,
+        message,
+        {
+            NOISE_JPEG_COMPRESSION: [1, 3, 5],
+            NOISE_CROP: None,
+            NOISE_ROTATE: [30.0],
+            NOISE_DIFFERENTIABLE: None,
+        },
+        save_folder=Path("data/sample_images/stella/noise_robustness"),
+    )
+    
+
+    
+    
 
 
 
@@ -193,7 +222,7 @@ def restart(
 
 if __name__ == "__main__":
     main(
-        data_path=Path("data/train2017_numpy_384.npy"),
+        data_path=Path("data/numpy/train2017_numpy_384.npy"),
         device=None,
         models_dir=Path("results/stegopatch/debugging1/models"),
         tensorboard_log_dir=Path("results/stegopatch/debugging1/runs"),

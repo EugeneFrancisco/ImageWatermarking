@@ -5,6 +5,7 @@ import json
 import os
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -16,10 +17,11 @@ from torchvision.models import resnet50, ResNet50_Weights
 from tqdm import tqdm
 
 import src.utils as utils
+import src.plotting.image_plotting as image_plotting
 from src.watermarkers.image_watermarker import ImageWatermarker
 from src.autoencoders.autoencoder import AutoEncoder
 from src.autoencoders.vqgan import VQGAN
-from src.noisers.stegopatch_noiser import StegoPatchNoiser
+from src.noisers.stegopatch_noiser import StegoPatchNoiser, NOISE_ROTATE
 
 class StegoPatch(ImageWatermarker):
     """
@@ -252,7 +254,8 @@ class StegoPatch(ImageWatermarker):
         message = message.reshape(1, self.message_length)
         message_t = torch.from_numpy(message).float()
         message_t = message_t.to(self.device)
-        stego = self.encode_batch(cover_t, message_t)
+        with torch.inference_mode():
+            stego = self.encode_batch(cover_t, message_t)
         stego = stego.squeeze(0)
         stego = stego.permute(1, 2, 0)
         return stego.detach().cpu().numpy()
@@ -339,8 +342,10 @@ class StegoPatch(ImageWatermarker):
         stego_image_t = torch.from_numpy(stego_image)
         stego_image_t = stego_image_t.permute(0, 3, 1, 2)
         stego_image_t = stego_image_t.to(self.device)
-        message = self.decode_batch(stego_image_t)
-        return message.detach().cpu().numpy()
+        logits = self.decode_batch(stego_image_t)
+        logits = logits.reshape((self.message_length))
+        predicted_bits = (logits > 0).long()
+        return predicted_bits.detach().cpu().numpy()
 
     def decode_batch(self, stego_images: torch.Tensor) -> torch.Tensor:
         """
@@ -380,6 +385,129 @@ class StegoPatch(ImageWatermarker):
         predicted_bits = (logits > 0).long().squeeze(0)
 
         return predicted_bits.cpu().numpy()
+
+    def evaluate_noise_robustness(
+        self,
+        cover: np.ndarray,
+        message: np.ndarray,
+        noise_types: dict[str, list[int] | list[float] | None],
+        save_folder: str | Path,
+    ) -> None:
+        """
+        Watermarks ``cover`` with ``message``, then applies each requested noise type
+        to the watermarked image independently and saves a titled plot for each. Also
+        saves the original cover and the clean watermarked image.
+
+        For every (noise type, parameter) the watermarked image is corrupted by just
+        that noise, the message is decoded from the corrupted image, and the resulting
+        bit accuracy (fraction of correctly recovered bits) is reported in the plot
+        title.
+
+        ``encode_image`` (not ``encode_batch``) is used to produce the watermarked
+        image, so it runs under inference_mode and is detached to numpy; no autograd
+        graph is retained for what may be a large image.
+
+        Args:
+            cover: an (H, W, C) [0, 1] image to watermark, as passed to encode_image.
+            message: a (message_length,) array of {0, 1} bits, as passed to
+                encode_image.
+            noise_types: maps a noise type name (a key of the noiser's
+                ``named_noise_functions``, e.g. "identity", "differentiable",
+                "jpeg_compression", "crop", "rotate") to the parameters to plot. If the
+                value is None, the noise is applied once with whatever parameter it
+                samples on its own; otherwise one plot is produced per entry in the
+                list. The list entries are interpreted per noise type: for the
+                imagenet-c corruptions they are integer severities, and for "rotate"
+                they are rotation angles in degrees (floats). Other noise types have no
+                tunable parameter, so only None is valid for them.
+            save_folder: directory the plots are written to (created if needed).
+        """
+        save_folder = Path(save_folder)
+        save_folder.mkdir(parents=True, exist_ok=True)
+
+        # Watermark the cover. encode_image runs under inference_mode and returns a
+        # detached numpy array, so no computational graph is kept around for the
+        # (possibly large) image.
+        stego = self.encode_image(cover, message)
+
+        image_plotting.save_image_plot(cover, "cover", save_folder / "cover.png")
+        image_plotting.save_image_plot(
+            stego, "watermarked", save_folder / "watermarked.png"
+        )
+
+        named_noise_functions = self.noiser.named_noise_functions()
+        message_bits = message.reshape(-1).astype(int)
+
+        for noise_type, params in noise_types.items():
+            if params is None:
+                # No fixed parameter requested: apply the noise with whatever
+                # parameter it samples on its own (random for imagenet-c / rotate,
+                # n/a otherwise).
+                self._noise_decode_and_plot(
+                    stego,
+                    named_noise_functions[noise_type],
+                    label=noise_type,
+                    filename=f"{noise_type}.png",
+                    message_bits=message_bits,
+                    save_folder=save_folder,
+                )
+            elif noise_type == NOISE_ROTATE:
+                # For rotation the parameters are fixed angles (in degrees).
+                for angle in params:
+                    noise_func = self.noiser.rotate_function_at_angle(angle)
+                    self._noise_decode_and_plot(
+                        stego,
+                        noise_func,
+                        label=f"{noise_type} (angle {angle})",
+                        filename=f"{noise_type}_angle_{angle}.png",
+                        message_bits=message_bits,
+                        save_folder=save_folder,
+                    )
+            else:
+                # For the imagenet-c corruptions the parameters are severities.
+                for severity in params:
+                    noise_func = self.noiser.noise_function_at_severity(
+                        noise_type, severity
+                    )
+                    self._noise_decode_and_plot(
+                        stego,
+                        noise_func,
+                        label=f"{noise_type} (severity {severity})",
+                        filename=f"{noise_type}_severity_{severity}.png",
+                        message_bits=message_bits,
+                        save_folder=save_folder,
+                    )
+
+    def _noise_decode_and_plot(
+        self,
+        stego: np.ndarray,
+        noise_func,
+        label: str,
+        filename: str,
+        message_bits: np.ndarray,
+        save_folder: Path,
+    ) -> None:
+        """
+        Applies ``noise_func`` to the watermarked image ``stego``, decodes the
+        message, and saves a titled plot of the noised image whose title is ``label``
+        plus the recovered bit accuracy.
+        """
+        # Apply the noise to the watermarked image off the autograd graph.
+        stego_t = (
+            torch.from_numpy(stego).permute(2, 0, 1).unsqueeze(0).to(self.device)
+        )
+        with torch.no_grad():
+            noised_t = noise_func(stego_t)
+        noised = noised_t.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
+
+        recovered = self.decode_image(np.expand_dims(noised, axis=0))
+        bit_accuracy = float((recovered.reshape(-1).astype(int) == message_bits).mean())
+
+        image_plotting.save_image_plot(
+            noised,
+            f"{label} (bit accuracy: {bit_accuracy:.2f})",
+            save_folder / filename,
+        )
 
     def train(self) -> None:
         """
