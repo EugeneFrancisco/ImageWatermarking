@@ -102,7 +102,9 @@ def build_configs(
     test_set = utils.NpyImageDataset(test_set_path) if test_set_path is not None else None
     noiser_configs = {
         "p_differentiable": 0,
-        "p_imagenet": 0,
+        # No imagenet corruptions at construction; the curriculum sets the real
+        # per-corruption probabilities. This is a {corruption_name: probability} dict.
+        "p_imagenet": {},
         "p_crop": P_CROP,
         "p_identity": P_IDENTITY,
         "p_rotate": P_ROTATE,
@@ -113,6 +115,14 @@ def build_configs(
         "rotation_upper_bound": ROTATION_BOUND,
     }
     noiser = StegoPatchNoiser(noiser_configs)
+
+    # Per-corruption imagenet-c sampling probabilities for the final training blend.
+    # Start from an equal split of the 0.225 imagenet budget across every corruption
+    # (the historical behaviour), then override individual corruptions to weight, say,
+    # jpeg over gaussian blur. Keep the dict's total at 0.225 so the overall blend
+    # still sums to 1, e.g.:
+    #   imagenet_probabilities[NOISE_JPEG_COMPRESSION] = 0.1
+    imagenet_probabilities = noiser.uniform_imagenet_probabilities(0.225)
     return {
         "device": device,
         "autoencoder_type": "VQGAN",
@@ -145,7 +155,8 @@ def build_configs(
         "num_steps_to_save": NUM_STEPS_TO_SAVE,
         "tensorboard_log_dir": tensorboard_log_dir,
         "log_tensorboard": LOG_TENSORBOARD,
-        "noiser": noiser
+        "noiser": noiser,
+        "imagenet_probabilities": imagenet_probabilities,
     }
 
 def _build_stegopatch(

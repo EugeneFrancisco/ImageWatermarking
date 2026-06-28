@@ -21,7 +21,11 @@ import src.plotting.image_plotting as image_plotting
 from src.watermarkers.image_watermarker import ImageWatermarker
 from src.autoencoders.autoencoder import AutoEncoder
 from src.autoencoders.vqgan import VQGAN
-from src.noisers.stegopatch_noiser import StegoPatchNoiser, NOISE_ROTATE
+from src.noisers.stegopatch_noiser import (
+    StegoPatchNoiser,
+    NOISE_ROTATE,
+    NOISE_JPEG_COMPRESSION,
+)
 
 class StegoPatch(ImageWatermarker):
     """
@@ -73,6 +77,15 @@ class StegoPatch(ImageWatermarker):
         # only active corruption. Robustness to cropping is the whole point of
         # StegoPatch, so the model trains against crops before any other noise.
         self.crop_probability: float = 0.5
+
+        # Per-corruption imagenet-c sampling probabilities used in the final noise
+        # blend, as a {corruption_name: probability} dict. Splitting the imagenet
+        # budget per corruption lets us weight e.g. jpeg over gaussian blur. Defaults
+        # to an equal split of 0.225 across every corruption (the historical blend).
+        self.imagenet_probabilities: dict[str, float] = self.configs.get(
+            "imagenet_probabilities",
+            self.noiser.uniform_imagenet_probabilities(0.225),
+        )
 
         # ========== Dataset Material =============
 
@@ -545,7 +558,7 @@ class StegoPatch(ImageWatermarker):
         self.noiser.set_probabilities(
             p_identity=1 - self.crop_probability,
             p_differentiable=0,
-            p_imagenet=0,
+            p_imagenet={},
             p_crop=self.crop_probability,
             p_rotate=0
         )
@@ -613,13 +626,16 @@ class StegoPatch(ImageWatermarker):
 
         # =================== Checkpoint 4 begins =================
         # Turn on the full noise blend (differentiable + imagenet-c corruptions, alongside
-        # cropping) to finish training for robustness.
+        # cropping) to finish training for robustness. The imagenet budget is split per
+        # corruption via self.imagenet_probabilities; identity absorbs whatever is left
+        # so the four scalars plus the per-corruption probabilities sum to 1.
+        p_diff = p_crop = p_rotate = 0.225
         self.noiser.set_probabilities(
-            p_identity=0.1,
-            p_differentiable=0.225,
-            p_imagenet=0.225,
-            p_crop=0.225,
-            p_rotate=0.225
+            p_identity=1.0 - (p_diff + p_crop + p_rotate + sum(self.imagenet_probabilities.values())),
+            p_differentiable=p_diff,
+            p_imagenet=self.imagenet_probabilities,
+            p_crop=p_crop,
+            p_rotate=p_rotate
         )
         self.train_until(
             self.dataset,
@@ -649,7 +665,8 @@ class StegoPatch(ImageWatermarker):
                     recovery (no beta ramp yet) until bit accuracy reaches 0.8.
                 2 - begin ramping beta from beta_min to beta_max until 0.95.
                 3 - expose the full training set until bit accuracy reaches 0.98.
-                4 - turn on the full noise blend and finish training.
+                4 - turn on the full noise blend.
+                5 - focus training on just jpeg images.
         """
         # If a rolling auto-resume checkpoint is present it reflects more recent
         # progress than the explicitly requested checkpoint (e.g. the run was
@@ -660,7 +677,7 @@ class StegoPatch(ImageWatermarker):
                 save_path = self.autosave_path
                 checkpoint = autosave_phase
 
-        assert checkpoint in (1, 2, 3, 4)
+        assert checkpoint in (1, 2, 3, 4, 5)
 
         # Restore weights, optimizer state, and the beta schedule progress.
         self.load_model(save_path)
@@ -677,7 +694,7 @@ class StegoPatch(ImageWatermarker):
         self.noiser.set_probabilities(
             p_identity=1 - self.crop_probability,
             p_differentiable=0,
-            p_imagenet=0,
+            p_imagenet={},
             p_crop=self.crop_probability,
             p_rotate=0
         )
@@ -732,26 +749,53 @@ class StegoPatch(ImageWatermarker):
             )
             self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint4.pt")
 
-        # =================== Checkpoint 4 begins =================
-        # Turn on the full noise blend (differentiable + imagenet-c, alongside
-        # cropping) to finish training for robustness.
+        if checkpoint in (1, 2, 3, 4):
+            # =================== Checkpoint 4 begins =================
+            # Turn on the full noise blend (differentiable + imagenet-c, alongside
+            # cropping) to finish training for robustness. The imagenet budget is split
+            # per corruption via self.imagenet_probabilities; identity absorbs the rest.
+            self.beta = self.beta_max
+            p_diff = p_crop = p_rotate = 0.225
+            self.noiser.set_probabilities(
+                p_identity=1.0 - (p_diff + p_crop + p_rotate + sum(self.imagenet_probabilities.values())),
+                p_differentiable=p_diff,
+                p_imagenet=self.imagenet_probabilities,
+                p_crop=p_crop,
+                p_rotate=p_rotate
+            )
+            self.train_until(
+                self.dataset,
+                max_epochs=self.num_epochs,
+                progress_bar="step",
+                save_interval_epochs=1,
+                start_time=start_time,
+                checkpoint=4,
+            )
+            self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint5.pt")
+
+        # ================= Checkpoint 5 begins ===============
+        # Focus training on jpeg robustness: sample jpeg compression heavily while
+        # keeping a little of the other branches so they don't regress. Splitting the
+        # imagenet probability per corruption is exactly what makes this possible.
         self.beta = self.beta_max
         self.noiser.set_probabilities(
             p_identity=0.1,
-            p_differentiable=0.225,
-            p_imagenet=0.225,
-            p_crop=0.225,
-            p_rotate=0.225
+            p_differentiable=0.1,
+            p_imagenet={NOISE_JPEG_COMPRESSION: 0.6},
+            p_crop=0.1,
+            p_rotate=0.1,
         )
+        self.noiser.set_severity_range([1, 3])
+
         self.train_until(
             self.dataset,
             max_epochs=self.num_epochs,
             progress_bar="step",
             save_interval_epochs=1,
             start_time=start_time,
-            checkpoint=4,
+            checkpoint=5,
         )
-        self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint5.pt")
+        self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint6.pt")
 
         # Training finished cleanly: drop the rolling auto-resume checkpoint so
         # the next fresh run isn't mistaken for an interrupted one.

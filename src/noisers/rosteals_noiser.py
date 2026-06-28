@@ -1,7 +1,7 @@
 """
 This file defines an inheritor of the noiser to mimic the noising scheme from Bui et al.
 """
-from typing import Union, Callable
+from typing import Union, Callable, Sequence
 from src.noisers.imagenet_corruptions import corrupt, DEFAULT_CORRUPTION_IDS, CORRUPTION_NAMES
 from src.noisers.noiser import Noiser
 from PIL import Image
@@ -48,6 +48,14 @@ class RoSteALSNoiser(Noiser):
         # imagenet-c params
         self.corruption_ids = list(c.get("imagenet_corruptions", self._DEFAULT_CORRUPTIONS))
         self.severity_range = c.get("imagenet_severity_range", [1, 5])
+
+    # -- configuration -------------------------------------------------------
+    def set_severity_range(self, severity_range: Sequence[int]) -> None:
+        """Reset the imagenet-c severity range used when sampling severities."""
+        lo, hi = severity_range
+        if lo > hi:
+            raise ValueError(f"severity_range must be [lo, hi] with lo <= hi, got {severity_range!r}")
+        self.severity_range = [int(lo), int(hi)]
 
     # -- type normalisation --------------------------------------------------
     def _normalize_type(self, noise_type: Union[str, int]) -> int:

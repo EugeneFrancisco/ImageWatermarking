@@ -11,6 +11,7 @@ import torch
 import torchvision.transforms.functional as TF
 
 from src.noisers.rosteals_noiser import RoSteALSNoiser
+from src.noisers.imagenet_corruptions import CORRUPTION_NAMES
 
 
 # Canonical noise-type names. These are exactly the keys of
@@ -56,6 +57,10 @@ class StegoPatchNoiser(RoSteALSNoiser):
         c = self.configs
 
         # Require every branch probability to be set explicitly (fail loudly otherwise).
+        # ``p_imagenet`` is a dict mapping each imagenet-c corruption name to its own
+        # probability, so individual corruptions (e.g. jpeg vs gaussian blur) can be
+        # weighted independently rather than sharing one imagenet probability split
+        # equally.
         self.set_probabilities(
             p_identity=c["p_identity"],
             p_differentiable=c["p_differentiable"],
@@ -76,17 +81,44 @@ class StegoPatchNoiser(RoSteALSNoiser):
         self,
         p_identity: float,
         p_differentiable: float,
-        p_imagenet: float,
+        p_imagenet: dict[str, float],
         p_crop: float,
         p_rotate: float,
     ) -> None:
-        """Overwrite the branch sampling probabilities. They must sum to 1."""
-        assert abs(p_identity + p_differentiable + p_imagenet + p_crop + p_rotate - 1.0) < 1e-6
+        """Overwrite the branch sampling probabilities.
+
+        ``p_imagenet`` maps an individual imagenet-c corruption name (the values of
+        ``CORRUPTION_NAMES``, e.g. ``NOISE_JPEG_COMPRESSION``) to the probability of
+        sampling that one corruption, so different corruptions can be weighted
+        independently rather than all sharing a single imagenet probability split
+        equally. Any configured corruption left out of the dict is given probability
+        zero. All probabilities -- the four scalars plus every value in
+        ``p_imagenet`` -- must sum to 1.
+        """
+        valid_names = {CORRUPTION_NAMES[cid] for cid in self.corruption_ids}
+        unknown = set(p_imagenet) - valid_names
+        assert not unknown, f"Unknown imagenet corruption(s): {sorted(unknown)}"
+
+        # Fill in any unspecified corruption with zero so the distribution is always
+        # defined over every configured corruption.
+        p_imagenet = {name: float(p_imagenet.get(name, 0.0)) for name in valid_names}
+
+        total = p_identity + p_differentiable + p_crop + p_rotate + sum(p_imagenet.values())
+        assert abs(total - 1.0) < 1e-6
         self.p_identity = p_identity
         self.p_diff = p_differentiable
         self.p_imagenet = p_imagenet
         self.p_crop = p_crop
         self.p_rotate = p_rotate
+
+    def uniform_imagenet_probabilities(self, total: float) -> dict[str, float]:
+        """Split ``total`` probability equally across every configured imagenet-c
+        corruption, returning a {corruption_name: probability} dict suitable for the
+        ``p_imagenet`` argument of :meth:`set_probabilities`. Handy for reproducing
+        the old equal-split behaviour before tweaking individual corruptions."""
+        names = [CORRUPTION_NAMES[cid] for cid in self.corruption_ids]
+        share = total / len(names)
+        return {name: share for name in names}
 
     # -- type normalisation --------------------------------------------------
     def _normalize_type(self, noise_type: Union[str, int]) -> int:
@@ -104,6 +136,15 @@ class StegoPatchNoiser(RoSteALSNoiser):
     def get_noise_function(
         self, noise_type: Union[str, int]
     ) -> Callable[[torch.Tensor], torch.Tensor]:
+        # An individual imagenet-c corruption requested by name: apply just that one
+        # corruption to the whole batch (with a per-image random severity), matching
+        # how the corruptions are sampled and labelled everywhere else.
+        if (
+            isinstance(noise_type, str)
+            and noise_type.lower() in self._CORRUPTION_NAME_TO_ID
+        ):
+            cid = self._CORRUPTION_NAME_TO_ID[noise_type.lower()]
+            return lambda x: self._imagenet_corrupt_batch(x, cid)
         t = self._normalize_type(noise_type)
         if t == self.CROP:
             return self._crop_noise
@@ -111,10 +152,21 @@ class StegoPatchNoiser(RoSteALSNoiser):
             return self._rotate_noise
         return super().get_noise_function(noise_type)
 
-    def sample_noise_type(self) -> int:
-        types = [self.DIFFERENTIABLE, self.IMAGENET, self.IDENTITY, self.CROP, self.ROTATE]
-        probs = [self.p_diff, self.p_imagenet, self.p_identity, self.p_crop, self.p_rotate]
-        return int(np.random.choice(types, p=probs))
+    def sample_noise_type(self) -> Union[int, str]:
+        """Sample which branch to apply. Returns an int code for the structural
+        branches (identity / differentiable / crop / rotate) and the corruption
+        *name* (a string) for an individual imagenet-c corruption, so each
+        corruption is sampled with its own probability from ``p_imagenet``."""
+        options: list = [self.DIFFERENTIABLE, self.IDENTITY, self.CROP, self.ROTATE]
+        probs = [self.p_diff, self.p_identity, self.p_crop, self.p_rotate]
+        for cid in self.corruption_ids:
+            name = CORRUPTION_NAMES[cid]
+            options.append(name)
+            probs.append(self.p_imagenet[name])
+        # Index into ``options`` so the int codes and string names aren't coerced to a
+        # common numpy dtype.
+        idx = int(np.random.choice(len(options), p=probs))
+        return options[idx]
 
     # -- crop ----------------------------------------------------------------
     def _crop_noise(self, x: torch.Tensor) -> torch.Tensor:
