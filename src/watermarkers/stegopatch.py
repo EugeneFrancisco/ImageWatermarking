@@ -8,6 +8,7 @@ from datetime import datetime
 import numpy as np
 import torch
 import torch.nn as nn
+from PIL import Image
 from torch.utils.data import Dataset, Subset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.models import resnet50, ResNet50_Weights
@@ -342,6 +343,39 @@ class StegoPatch(ImageWatermarker):
         Returns the decoded messages from a batch of stego images.
         """
         return self.secret_decoder(stego_images)
+
+    def decode_file(self, path: str, size: int | None = None) -> np.ndarray:
+        """
+        Decodes the message embedded in a watermarked PNG and returns it as a numpy
+        array of bits.
+
+        Args:
+            path: file path to a .png image.
+            size: if given, the image is resized to a ``size`` x ``size`` square
+                before decoding. Decoding is most accurate when the image is at
+                the resolution the model was trained on, so pass that size when
+                the file may differ.
+        Returns:
+            A 1-D numpy array of length message_length with {0, 1} integer bits.
+        """
+        # Load as an (H, W, C) float array in [0, 1], matching the training pipeline.
+        image = Image.open(path).convert("RGB")
+        if size is not None:
+            image = image.resize((size, size))
+        image = np.asarray(image, dtype=np.float32) / 255.0
+
+        # To a (1, C, H, W) tensor on the model's device.
+        image_t = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).to(self.device)
+
+        # Run the decoder in eval mode (so BatchNorm uses running stats) without
+        # tracking gradients, then hard-threshold the per-bit logits at 0 exactly
+        # as training does.
+        self.secret_decoder.eval()
+        with torch.no_grad():
+            logits = self.decode_batch(image_t)
+        predicted_bits = (logits > 0).long().squeeze(0)
+
+        return predicted_bits.cpu().numpy()
 
     def train(self) -> None:
         """

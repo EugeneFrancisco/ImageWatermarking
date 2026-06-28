@@ -16,7 +16,7 @@ DEBUGGING = 0
 TRAINING = 1
 TESTING = 2
 
-MODE = TRAINING
+MODE = TESTING
 
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
@@ -164,14 +164,12 @@ def main(
     models_dir: str,
     tensorboard_log_dir: str,
 ):
-    configs = build_configs(
+    stegopatch = stegopatch = _build_stegopatch(
         data_path,
         device,
         models_dir,
-        tensorboard_log_dir
-    )
-    stegopatch = StegoPatch(configs)
-    stegopatch.train()
+        tensorboard_log_dir,
+        )
 
 
 
