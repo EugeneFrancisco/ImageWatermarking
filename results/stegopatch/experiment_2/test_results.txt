@@ -1,0 +1,19 @@
+quality_loss: 0.05273814491778612
+bit_accuracy/identity: {'min': 0.8500000238418579, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9995049999117851, 'count': 20000}
+bit_accuracy/differentiable: {'min': 0.30000001192092896, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.995939999756217, 'count': 20000}
+bit_accuracy/gaussian_noise: {'min': 0.550000011920929, 'q1': 0.949999988079071, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9809125002652407, 'count': 20000}
+bit_accuracy/shot_noise: {'min': 0.5, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.98312500012815, 'count': 20000}
+bit_accuracy/impulse_noise: {'min': 0.30000001192092896, 'q1': 0.949999988079071, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9620900018766523, 'count': 20000}
+bit_accuracy/defocus_blur: {'min': 0.800000011920929, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9989974998623132, 'count': 20000}
+bit_accuracy/fog: {'min': 0.699999988079071, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9963874996393919, 'count': 20000}
+bit_accuracy/brightness: {'min': 0.8500000238418579, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9994349998950959, 'count': 20000}
+bit_accuracy/contrast: {'min': 0.699999988079071, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9978974997401238, 'count': 20000}
+bit_accuracy/elastic_transform: {'min': 0.15000000596046448, 'q1': 0.6000000238418579, 'median': 0.699999988079071, 'q3': 0.800000011920929, 'max': 1.0, 'mean': 0.6919700122892857, 'count': 20000}
+bit_accuracy/pixelate: {'min': 0.800000011920929, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9994649999111891, 'count': 20000}
+bit_accuracy/jpeg_compression: {'min': 0.25, 'q1': 0.949999988079071, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.971112500192225, 'count': 20000}
+bit_accuracy/speckle_noise: {'min': 0.4000000059604645, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9909374998793006, 'count': 20000}
+bit_accuracy/gaussian_blur: {'min': 0.8500000238418579, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9992849998891353, 'count': 20000}
+bit_accuracy/spatter: {'min': 0.9000000357627869, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9995074999094009, 'count': 20000}
+bit_accuracy/saturate: {'min': 0.6000000238418579, 'q1': 1.0, 'median': 1.0, 'q3': 1.0, 'max': 1.0, 'mean': 0.9944374997586012, 'count': 20000}
+bit_accuracy/crop: {'min': 0.15000000596046448, 'q1': 0.699999988079071, 'median': 0.8500000238418579, 'q3': 0.949999988079071, 'max': 1.0, 'mean': 0.8066625095561146, 'count': 20000}
+bit_accuracy/rotate: {'min': 0.20000000298023224, 'q1': 0.6000000238418579, 'median': 0.699999988079071, 'q3': 0.8500000238418579, 'max': 1.0, 'mean': 0.7315425112269819, 'count': 20000}

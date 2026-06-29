@@ -250,8 +250,8 @@ def evaluate(
 
     Usage:
 
-        modal run modal_app.py::evaluate
-        modal run modal_app.py::evaluate --checkpoint-path /output/models/rosteals_.../checkpoint5.pt
+        modal run -d modal_app.py::evaluate
+        modal run -d modal_app.py::evaluate --checkpoint-path /output/models/rosteals_.../checkpoint5.pt
     """
     test.spawn(
         checkpoint_path=checkpoint_path,
