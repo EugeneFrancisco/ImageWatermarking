@@ -27,7 +27,7 @@ Watermarking refers to the process of embedding information in generated data so
 RoSteALS, introduced by Bui et al.~\cite{bui2023rosteals}, is the most direct inspiration for StegoPatch. Rather than learning an image-to-image encoder and decoder from scratch, RoSteALS watermarks within the latent space of a fixed, image autoencoder. A small neural network maps bit sequences to additive perturbations of the latent variable, which is then decoded back into image space. StegoPatch adopts this latent-space embedding strategy and extends it to embed messages spatially, exploiting the convolutional structure of the autoencoder so that the watermark is repeated across the image and can survive cropping.
 
 
-Tancik et al.~\cite{tancik2020stegastamp} introduced StegaStamp. Their model allowed watermarks to survive the physical printing and recapture of an image. To accomplish this, StegaStamp is trained against a set of differentiable image perturbations like noise, blur, color shifts, and perspective warps, between the encoder and decoder during training, forcing the decoder to recover messages even from heavily corrupted inputs. StegoPatch borrows this idea of embedding a noise layer between encoding and decoding: we expose the secret decoder to spatial transformations like cropping and rotating, as well as noising, blurring, and JPEG compression, so that messages remain recoverable after these corruptions. Earlier, Zhu et al.~\cite{zhu2018hidden} proposed HiDDeN, one of the first end-to-end deep watermarking frameworks; we adopt their ideas for for decoding messages by aggregating message predictions across the image with by vote.
+Tancik et al.~\cite{tancik2020stegastamp} introduced StegaStamp. Their model allowed watermarks to survive the physical printing and recapture of an image. To accomplish this, StegaStamp is trained against a set of differentiable image perturbations like noise, blur, color shifts, and perspective warps, between the encoder and decoder during training, forcing the decoder to recover messages even from heavily corrupted inputs. StegoPatch borrows this idea of embedding a noise layer between encoding and decoding: we expose the secret decoder to spatial transformations like cropping and rotating, as well as noising, blurring, and JPEG compression, so that messages remain recoverable after these corruptions. Earlier, Zhu et al.~\cite{zhu2018hidden} proposed HiDDeN, one of the first end-to-end deep watermarking frameworks; we adopt their ideas for decoding messages by aggregating message predictions across the image by vote.
 \begin{center}
 	\begin{figure*}[h]
 	\includegraphics[scale=0.4]{images/stella/title_picture_tex.png}
@@ -49,7 +49,7 @@ StegoPatch trains two neural networks:
 \item A secret decoder $D_\varphi: \R^{H\times W\times C} \to \{0, 1\}^{\ell}$ which is used to recover a message $\hat m$ from a (possibly corrupted) $\tilde c$.	
 \end{enumerate}
 
-The message encoder $F_\theta$ takes advantage of a fixed image autoencoder to embed messages. Let $(E, G)$ be an image autoencoder. $E$ is an image encoder that sends images $c\in \R^{H\times W\times C}$ to $z = E(G) \in \R^{H'\times W'\times C}$ where $H', W'$ are a constant factor smaller than $H$ and $W$. And $G$ is an image generator that takes latent variables $z\in \R^{H'\times W'\times C}$ and sends them to $c = G(z) \in \R^{H\times W\times C}$. It is important that $(E, G)$ are convolutional so that they preserve spatial information. $(E, G)$ are fixed in advance and aren't trained.
+The message encoder $F_\theta$ takes advantage of a fixed image autoencoder to embed messages. Let $(E, G)$ be an image autoencoder. $E$ is an image encoder that sends images $c\in \R^{H\times W\times C}$ to $z = E(c) \in \R^{H'\times W'\times C}$ where $H', W'$ are a constant factor smaller than $H$ and $W$. And $G$ is an image generator that takes latent variables $z\in \R^{H'\times W'\times C}$ and sends them to $c = G(z) \in \R^{H\times W\times C}$. It is important that $(E, G)$ are convolutional so that they preserve spatial information. $(E, G)$ are fixed in advance and aren't trained.
 
 The networks $F_\theta$ and $D_\varphi$ encode in the following way:
 
@@ -59,9 +59,9 @@ The networks $F_\theta$ and $D_\varphi$ encode in the following way:
 For each patch $p\in \P$, create the watermarked patch $\tilde p \leftarrow p + \delta$. Using the watermarked patches, stitch together a watermarked latent $\tilde z$. Finally, return $G(\tilde z)$ as the watermarked cover. See Algorithm~\ref{alg:encoder}.
 
 The neural network $F_\theta$ is a very small convolutional neural network implemented in a similar way to Bui et al.
-\item Secret Decoder: Given a (possibly corrupted) watermarked image $\tilde c$, the secret decoder returns $\hat m = D_\varphi(c)$. The neural network $D_\varphi(c)$ is implemented as a modified ResNet50 with the final flattening layer replaced by a $1\times 1$ CNN whose output is $\ell$ channeled. An average is taken across the width and height dimensions to retrieve an $\ell$ length vector of logits which are thresholded and returned as $\hat m$. See Algorithm~\ref{alg:decoder}
+\item Secret Decoder: Given a (possibly corrupted) watermarked image $\tilde c$, the secret decoder returns $\hat m = D_\varphi(\tilde c)$. The neural network $D_\varphi$ is implemented as a modified ResNet50 with the final flattening layer replaced by a $1\times 1$ CNN whose output is $\ell$ channeled. An average is taken across the width and height dimensions to retrieve an $\ell$ length vector of logits which are thresholded and returned as $\hat m$. See Algorithm~\ref{alg:decoder}
 
-This last phase \textit{voting} step is taken from Zhu et al.'s HiDDeN~\cite{zhu2018hidden}.
+This last \textit{voting} step is taken from Zhu et al.'s HiDDeN~\cite{zhu2018hidden}.
 \end{enumerate}
 \begin{center}
 	\begin{figure*}
@@ -142,7 +142,7 @@ In this architecture, it is important that the patching and periodic pasting of 
 	\end{tabular}
 	\caption{Qualitative results. Each row is an image class (cat, elephants,
 	flower, kite, planes) and each column is a transformation applied to the
-	watermarked image (cover and watermarked shown for reference). Watermarked images without noise apply achieve $100\%$ bit accuracy.}
+	watermarked image (cover and watermarked shown for reference). Watermarked images without any noise applied achieve $100\%$ bit accuracy.}
 	\label{fig:results}
 \end{figure*}
 
@@ -196,7 +196,7 @@ We use several different noise transformations which can be seen in Figure~\ref{
 \begin{figure}
 	\includegraphics[scale=0.40]{images/stegosaurus/cover.png}\includegraphics[scale=0.40]{images/stegosaurus/watermarked.png}
 	\label{fig:stegosaurus}
-	\caption{StegoStamp applied to an image with text.}
+	\caption{StegoPatch applied to an image with text.}
 \end{figure}
 
 
@@ -217,9 +217,11 @@ StegoPatch achieves very strong performance on most forms of image manipulation,
 	\label{fig:whiskers}
 	\caption{A whisker plot of StegoPatch's performance against different image manipulations.}
 \end{figure*}
-
-However, StegoPatch still has notable weaknesses. For example, although StegoPatch does significantly better than guessing when crops are applied, it still has a statistical power of only around $0.75$ (crops are sampled as a random height and random width, where height and widths must be a minimum of $3$ patch-lengths). We note though that this power grows with image size as more patches become visible. Another disadvantage of StegoStamp is that, applied to images that have much larger resolution than what is trained on, StegoStamp seems to impart more discoloring on the image. Also, on images that have little detail, StegoStamp struggles to recover images that have been JPEG compressed (see future work).
+However, StegoPatch still has notable weaknesses. For example, although StegoPatch does significantly better than guessing when crops are applied, it still has a statistical power of only around $0.75$ (crops are sampled as a random height and random width, where height and widths must be a minimum of $3$ patch-lengths). We note though that this power grows with image size as more patches become visible. Another disadvantage of StegoPatch is that, applied to images that have much larger resolution than what is trained on, StegoPatch seems to impart more discoloring on the image. Also, on images that have little detail, StegoPatch struggles to recover images that have been JPEG compressed (see future work).
 \section{Future Work}
+Training StegoPatch on even larger, higher resolution images, will likely allow for much stronger robustness against cropping. Part of the challenge with training StegoPatch is that training images cannot be significantly larger than their cropped counterparts due to the author's compute limitations. While we used images that were $4\times 4$ patches across with a maximum crop down to $3\times 3$ patches, an ideal setting would train StegoPatch on larger images where more patches can be spread out.
+
+Along these lines, it may be interesting to see whether patch placement can be chosen more carefully rather than pure periodicity. One may be able to choose the places in the image where the watermark would be more hidden to place a stronger watermark. For example, the message encoder $F_\theta$ could take in the cover image too as input to give it context for how much to watermark each patch, as in StegaStamp~\cite{tancik2020stegastamp}.
 
 
 \begin{thebibliography}{9}
@@ -298,6 +300,13 @@ Christie's.
 	\end{tabular}
 	\caption{The full set of image manipulations (noises) applied to a single cover image during training and evaluation. Each panel shows the same image after a different distortion.}
 	\label{fig:all_noises}
+\end{figure*}
+
+\begin{figure*}
+	\includegraphics[scale=0.5]{images/metrics/beta.png}\includegraphics[scale=0.5]{images/metrics/bit_accuracy.png}\\
+	\includegraphics[scale=0.5]{images/metrics/delta_l2.png}
+	\includegraphics[scale=0.5]{images/metrics/loss_quality.png}
+	\caption{Performance curves during training. Training was done over the course of three runs.}
 \end{figure*}
 
 

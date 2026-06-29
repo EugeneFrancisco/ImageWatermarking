@@ -109,7 +109,7 @@
 <body>
 
 <h1>StegoPatch</h1>
-<p class="author">Crop-robust image watermarking &middot; Eugene Francisco</p>
+<p class="author">Crop-robust image watermarking &middot; Eugene Francisco &middot; <a href="TODO-full-writeup-pdf/">Full writeup (PDF)</a></p>
 <figure>
   <img src="images/stella/title_picture.png" alt="StegoPatch title image">
   <figcaption>
@@ -159,61 +159,19 @@
 <p>
   More implementation details can be found here: TODO add link.
 </p>
-<h2>Results</h2>
-<p>
-  TODO
-</p>
-
-<h2>Future Work</h2>
-<p>
-The most challenging part of building StegoPatch is ensuring robustness to JPEG compression.
-There is a tradeoff when training between the quality of the watermarker and the robustness to lossy
-compresion: more reliable watermarkers tend to have stronger artifacts like patches of discoloration
-in the watermarked image.
-</p>
-
-<p>
-One way to possibly address this in the future is to more carefully choose where to place
-watermarked patches. Instead of periodically tiling the image with the message, one could choose
-places in the image where the watermark would be more hidden to place a stronger watermark. For
-example, the message encoder \(f_\theta\) could take in the cover image too as input
-to give it context for how much to watermark each patch, as in StegaStamp (Tancik et al.)<a href="#ref-3" class="cite">3</a>.
-</p>
-
-
-<h2>Example Results</h2>
-<p>
-  Watermarked images from our first experiment. Each row shows the original cover (left) and the
-  watermarked version (right). The embedded message is mostly invisible; however some patches can
-  still be seen, as with the plane (top) and the distorted faces (bottom).
-</p>
+<h2>Gallery</h2>
 <figure>
   <div class="col-head"><span>Cover</span><span>Watermarked</span></div>
   <div class="pairs">
-    <div class="pair"><img src="images/img1/cover.png" alt="cover 1"><img src="images/img1/stego.png" alt="watermarked 1"></div>
-    <div class="pair"><img src="images/img2/cover.png" alt="cover 2"><img src="images/img2/stego.png" alt="watermarked 2"></div>
-    <div class="pair"><img src="images/img3/cover.png" alt="cover 3"><img src="images/img3/stego.png" alt="watermarked 3"></div>
-    <div class="pair"><img src="images/img4/cover.png" alt="cover 4"><img src="images/img4/stego.png" alt="watermarked 4"></div>
-    <div class="pair"><img src="images/img5/cover.png" alt="cover 5"><img src="images/img5/stego.png" alt="watermarked 5"></div>
-  </div>
-</figure>
-
-<h2>Training Metrics</h2>
-<p>
-  Training curves from our first experiment, smoothed for readability (the faint lines show the raw,
-  unsmoothed values). The run spans three sessions, which line up into one continuous trajectory.
-  Note in particular that <strong>Bit accuracy</strong> crosses ~98%; the noise in bit accuracy
-  comes from the variability in image transformation but with error correcting codes, message
-  recovery is essentially lossless.
-</p>
-<figure>
-  <div class="metrics-grid">
-    <img src="images/metrics/bit_accuracy.png" alt="bit accuracy curve">
-    <img src="images/metrics/loss_recovery.png" alt="recovery loss curve">
-    <img src="images/metrics/delta_l2.png" alt="delta L2 norm curve">
+    <div class="pair"><img src="images/elephants/cover.png" alt="elephants cover"><img src="images/elephants/watermarked.png" alt="elephants watermarked"></div>
+    <div class="pair"><img src="images/planes/cover.png" alt="planes cover"><img src="images/planes/watermarked.png" alt="planes watermarked"></div>
+    <div class="pair"><img src="images/kite/cover.png" alt="kite cover"><img src="images/kite/watermarked.png" alt="kite watermarked"></div>
+    <div class="pair"><img src="images/stegosaurus/cover.png" alt="stegosaurus cover"><img src="images/stegosaurus/watermarked.png" alt="stegosaurus watermarked"></div>
+    <div class="pair"><img src="images/cat/cover.png" alt="cat cover"><img src="images/cat/watermarked.png" alt="cat watermarked"></div>
   </div>
   <figcaption>
-    Bit accuracy, recovery loss, and the latent offset norm (\(\delta\) L2) over training steps.
+    Each row shows the original cover (left) and the watermarked version (right). The same message
+    has been encoded into all of these images.
   </figcaption>
 </figure>
 

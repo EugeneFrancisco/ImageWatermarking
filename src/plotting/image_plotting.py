@@ -34,13 +34,19 @@ def load_image(path: Path, height: int, width: int) -> np.ndarray:
     return np.asarray(image, dtype=np.float32) / 255.0
 
 
-def save_image_plot(image: np.ndarray, title: str, save_path: Path) -> None:
-    """Saves a single (H, W, C) [0, 1] image as a titled plot to save_path (a .png file)."""
+def save_image_plot(
+    image: np.ndarray, title: str | None, save_path: Path
+) -> None:
+    """Saves a single (H, W, C) [0, 1] image as a plot to save_path (a .png file).
+
+    If title is None, no title is drawn.
+    """
     assert str(save_path).endswith(".png")
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.imshow(np.clip(image, 0.0, 1.0))
-    ax.set_title(title)
+    if title is not None:
+        ax.set_title(title)
     ax.axis("off")
     fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)

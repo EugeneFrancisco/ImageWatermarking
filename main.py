@@ -186,12 +186,8 @@ def main(
     tensorboard_log_dir: str,
 ):
     stegopatch = _build_stegopatch(data_path, device, models_dir, tensorboard_log_dir)
-    stegopatch.load_model("results/stegopatch/experiment_2/models/stegopatch_2026-06-27_15-57-27/checkpoint4_epoch_2.pt")
-    cover = image_plotting.load_image(
-        Path("data/sample_images/face/face.png"),
-        IMAGE_SIZE + 2*PATCH_SIZE,
-        IMAGE_SIZE + 2*PATCH_SIZE,
-    )
+    stegopatch.load_model("results/stegopatch/experiment_2/models/stegopatch_2026-06-28_19-47-04/checkpoint5_epoch_1.pt")
+
     message = np.empty(MESSAGE_LENGTH)
     for i in range(MESSAGE_LENGTH):
         if i % 2:
@@ -199,17 +195,30 @@ def main(
         else:
             message[i] = 1
 
-    stegopatch.evaluate_noise_robustness(
-        cover,
-        message,
-        {
-            # NOISE_JPEG_COMPRESSION: [1],
-            # NOISE_CROP: None,
-            # NOISE_ROTATE: [30.0],
-            # NOISE_DIFFERENTIABLE: None,
-        },
-        save_folder=Path("data/sample_images/face"),
-    )
+    image_dimension = IMAGE_SIZE + 2 * PATCH_SIZE
+
+    # Maps each image subject to the reference png inside its sample_images folder.
+    subjects = {
+        "cat": Path("data/sample_images/cat/000000236877.png"),
+        "elephants": Path("data/sample_images/elephants/elephants.png"),
+        "planes": Path("data/sample_images/planes/000000187269.png"),
+        "kite": Path("data/sample_images/kite/000000236794.png"),
+        "stegosaurus": Path("data/sample_images/stegosaurus/stegosaurus.png"),
+    }
+
+    for subject, image_path in subjects.items():
+        cover = image_plotting.load_image(
+            image_path,
+            image_dimension,
+            image_dimension,
+        )
+        # Empty noise dict: only the original cover and watermarked image are saved.
+        stegopatch.evaluate_noise_robustness(
+            cover,
+            message,
+            {},
+            save_folder=Path(f"data/sample_images/{subject}"),
+        )
     
 
     

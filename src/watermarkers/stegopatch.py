@@ -408,13 +408,12 @@ class StegoPatch(ImageWatermarker):
     ) -> None:
         """
         Watermarks ``cover`` with ``message``, then applies each requested noise type
-        to the watermarked image independently and saves a titled plot for each. Also
-        saves the original cover and the clean watermarked image.
+        to the watermarked image independently and saves an untitled plot for each
+        (the filename identifies which noise was applied). Also saves the original
+        cover and the clean watermarked image.
 
         For every (noise type, parameter) the watermarked image is corrupted by just
-        that noise, the message is decoded from the corrupted image, and the resulting
-        bit accuracy (fraction of correctly recovered bits) is reported in the plot
-        title.
+        that noise and the resulting noised image is saved.
 
         ``encode_image`` (not ``encode_batch``) is used to produce the watermarked
         image, so it runs under inference_mode and is detached to numpy; no autograd
@@ -443,13 +442,12 @@ class StegoPatch(ImageWatermarker):
         # (possibly large) image.
         stego = self.encode_image(cover, message)
 
-        image_plotting.save_image_plot(cover, "cover", save_folder / "cover.png")
+        image_plotting.save_image_plot(cover, None, save_folder / "cover.png")
         image_plotting.save_image_plot(
-            stego, "watermarked", save_folder / "watermarked.png"
+            stego, None, save_folder / "watermarked.png"
         )
 
         named_noise_functions = self.noiser.named_noise_functions()
-        message_bits = message.reshape(-1).astype(int)
 
         for noise_type, params in noise_types.items():
             if params is None:
@@ -459,9 +457,7 @@ class StegoPatch(ImageWatermarker):
                 self._noise_decode_and_plot(
                     stego,
                     named_noise_functions[noise_type],
-                    label=noise_type,
                     filename=f"{noise_type}.png",
-                    message_bits=message_bits,
                     save_folder=save_folder,
                 )
             elif noise_type == NOISE_ROTATE:
@@ -471,9 +467,7 @@ class StegoPatch(ImageWatermarker):
                     self._noise_decode_and_plot(
                         stego,
                         noise_func,
-                        label=f"{noise_type} (angle {angle})",
                         filename=f"{noise_type}_angle_{angle}.png",
-                        message_bits=message_bits,
                         save_folder=save_folder,
                     )
             else:
@@ -485,9 +479,7 @@ class StegoPatch(ImageWatermarker):
                     self._noise_decode_and_plot(
                         stego,
                         noise_func,
-                        label=f"{noise_type} (severity {severity})",
                         filename=f"{noise_type}_severity_{severity}.png",
-                        message_bits=message_bits,
                         save_folder=save_folder,
                     )
 
@@ -495,15 +487,13 @@ class StegoPatch(ImageWatermarker):
         self,
         stego: np.ndarray,
         noise_func,
-        label: str,
         filename: str,
-        message_bits: np.ndarray,
         save_folder: Path,
     ) -> None:
         """
-        Applies ``noise_func`` to the watermarked image ``stego``, decodes the
-        message, and saves a titled plot of the noised image whose title is ``label``
-        plus the recovered bit accuracy.
+        Applies ``noise_func`` to the watermarked image ``stego`` and saves an
+        untitled plot of the noised image to ``filename`` (the filename identifies
+        which noise was applied).
         """
         # Apply the noise to the watermarked image off the autograd graph.
         stego_t = (
@@ -513,14 +503,7 @@ class StegoPatch(ImageWatermarker):
             noised_t = noise_func(stego_t)
         noised = noised_t.squeeze(0).permute(1, 2, 0).detach().cpu().numpy()
 
-        recovered = self.decode_image(np.expand_dims(noised, axis=0))
-        bit_accuracy = float((recovered.reshape(-1).astype(int) == message_bits).mean())
-
-        image_plotting.save_image_plot(
-            noised,
-            f"{label} (bit accuracy: {bit_accuracy:.2f})",
-            save_folder / filename,
-        )
+        image_plotting.save_image_plot(noised, None, save_folder / filename)
 
     def train(self) -> None:
         """
